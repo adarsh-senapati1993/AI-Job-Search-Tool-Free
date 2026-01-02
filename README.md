@@ -12,136 +12,113 @@
 
 ---
 
-## ⚡ Quick Start Guide (For Non-Coders)
+## ⚡ Quick Start Guide (For Absolute Beginners)
 
-You do not need to be a programmer to use this. You just need to run it on your computer.
+You do not need to be a coder to use this. Follow these steps exactly.
 
-### 1. Prerequisites
-Before you start, ensure you have **Node.js** installed on your computer.
--   [Download Node.js here](https://nodejs.org/) (Choose the "LTS" version).
--   Install it like a normal program.
+### Phase 1: Preparation
 
-### 2. Get Your API Keys (The "Fuel")
-This app is "Bring Your Own Key" (BYOK). This ensures your data stays private and you only pay for what you use (usually < $5/month).
+1.  **Install Node.js (The Runtime)**
+    *   Go to [nodejs.org](https://nodejs.org/).
+    *   Download the **LTS Version** (Left button).
+    *   Install it just like you install any other program (Click Next, Next, Finish).
 
-#### 🔑 Key 1: The Brain (Perplexity AI)
-This powers the reasoning engine that reads resumes and writes emails.
-1.  Go to [Perplexity API Settings](https://www.perplexity.ai/settings/api).
-2.  You will need to add a payment method (credits). Start with **$5** (this lasts for hundreds of searches).
-3.  Click **"Generate API Key"**.
-4.  Copy the key (starts with `pplx-...`). **Save this somewhere safe.**
+2.  **Get Your API Keys (The "Fuel")**
+    *   *Why do I need these?* This app creates a direct connection between your computer and the AI. There is no middleman server. You need these keys to "pay" for the AI usage (usually less than $5 total).
+    
+    **A. The Brain (Perplexity AI)**
+    *   Go to [Perplexity API Settings](https://www.perplexity.ai/settings/api).
+    *   Add a payment method and add **$5 credit**.
+    *   Click **Generate API Key**.
+    *   Copy the code that starts with `pplx-...`. Save it in a text file for later.
 
-#### 🔑 Key 2: The Eyes (Serper Google Search)
-This allows the app to search the live internet for new jobs.
-1.  Go to [Serper.dev](https://serper.dev/).
-2.  Sign up (it's free!). You get **2,500 free searches** immediately.
-3.  On the dashboard, copy your **API Key**.
+    **B. The Eyes (Serper Google Search)**
+    *   Go to [Serper.dev](https://serper.dev/).
+    *   Sign up (Free).
+    *   You get 2,500 free searches. Copy the **API Key** from the dashboard.
 
 ---
 
-## 🛠️ Installation & Launch
+## 🛠️ Installation (Step-by-Step)
 
-1.  **Download this Project**:
-    *   Click the green **"Code"** button at the top right of this GitHub page -> **"Download ZIP"**.
-    *   Unzip the folder.
+### Step 1: Download the App
+1.  Scroll to the top of this GitHub page.
+2.  Click the green **<> Code** button.
+3.  Click **Download ZIP**.
+4.  Find the ZIP file in your Downloads folder and **Unzip/Extract** it.
 
-2.  **Open Terminal / Command Prompt**:
-    *   **Mac:** Press `Cmd + Space`, type "Terminal", press Enter.
-    *   **Windows:** Press `Win`, type "PowerShell", press Enter.
+### Step 2: Open the Terminal
+*   **On Mac:** Press `Command + Space`, type `Terminal`, and hit Enter.
+*   **On Windows:** Press the `Windows Key`, type `PowerShell`, and hit Enter.
 
-3.  **Navigate to the folder**:
-    *   Type `cd ` (with a space) and then **drag and drop the unzipped folder** into the terminal window.
-    *   Press **Enter**.
+### Step 3: Go to the Folder
+1.  In the terminal, type `cd ` (type **cd** followed by a **space**).
+2.  **Drag and drop** the unzipped folder from your desktop into the terminal window.
+3.  It should look like: `cd /Users/yourname/Downloads/job-radar-main`.
+4.  Press **Enter**.
 
-4.  **Install Dependencies**:
-    *   Type `npm install` and press **Enter**.
-    *   Wait for it to finish (you'll see a bunch of text scrolling).
+### Step 4: Install Dependencies (The "Scary" Part)
+1.  Type `npm install` and press **Enter**.
+2.  **What you will see:**
+    *   You will see text scrolling and progress bars.
+    *   ⚠️ **IGNORE YELLOW WARNINGS:** You might see text like `npm warn deprecated` or `found 3 vulnerabilities`. **This is normal.** It just means some sub-tools are older. As long as you see the line **"added X packages"** at the end, it worked.
+    *   *Do not run `npm audit fix` unless you know what you are doing.*
 
-5.  **Run the App**:
-    *   Type `npm run dev` and press **Enter**.
-    *   You will see a link like `http://localhost:5173`.
-    *   **Ctrl + Click** that link (or copy-paste it into your browser).
+### Step 5: Launch the App 🚀
+1.  Type `npm run dev` and press **Enter**.
+2.  You should see green text saying:
+    ```
+    ➜  Local:   http://localhost:5173/
+    ```
+3.  **Hold Command (Mac) or Ctrl (Windows)** and click that link.
+4.  The app will open in your browser!
 
 ---
 
 ## 🎮 How to Use Job Radar
 
-### Phase 1: System Initialization
-When you first open the app, you will see a setup wizard.
-1.  **Paste your Perplexity Key** -> Click "Connect Brain".
-2.  **Paste your Serper Key** -> Click "Activate Eyes".
+### 1. Setup Wizard
+*   Paste your **Perplexity Key** (The Brain) and click Connect.
+*   Paste your **Serper Key** (The Eyes) and click Activate.
 
-### Phase 2: Mission Configuration
-This is where you tell the AI who you are.
-1.  **Upload Resume:** Click the box and select your PDF resume. The AI will instantly read it and extract your skills.
-2.  **Target Roles:** Be specific.
-    *   *Good:* "Senior Product Manager", "Founding Engineer", "Staff Backend Developer".
-    *   *Bad:* "Manager", "Tech Job".
-3.  **Locations:**
-    *   **Critical:** If you want jobs in India, type `India`, `Bengaluru`, `Delhi`, etc.
-    *   *Note:* Adding Indian cities automatically activates the **"India Cluster"** (searching Naukri, Instahyre, Cutshort).
-    *   If you want `Remote`, type "Remote".
-4.  **Red Lines (Avoid):** Keywords that mean instant rejection (e.g., "Gambling", "Unpaid", "Consulting").
+### 2. Configure Your Mission
+*   **Upload Resume:** Click the box and select your PDF. The AI will auto-read your skills.
+*   **Target Roles:** Be specific! (e.g., "Senior Product Manager", "React Developer").
+*   **Locations:**
+    *   If you are in India, type `India` or `Bengaluru`. This activates the **special Indian Job Portal search** (Naukri, Instahyre).
+    *   For remote work, type `Remote`.
 
-### Phase 3: The Dashboard (Active Radar)
-Once configured, click **"Launch Mission"**. The app will now:
-1.  **Search:** It runs ~15 complex Google searches across LinkedIn, ATS boards (Greenhouse/Lever), and regional sites.
-2.  **Filter:** It removes duplicates and roles that are obviously wrong (e.g., "Sales" when you want "Product").
-3.  **Score:** The AI reads the remaining job descriptions.
+### 3. The Dashboard (Active Radar)
+*   Click **"Launch Mission"**.
+*   **Wait 30-60 seconds.** The app is searching the live internet.
+*   **The Score Ring:**
+    *   🟢 **Green (>80):** High Match.
+    *   🟡 **Yellow (50-79):** Decent Match.
+    *   🔴 **Red (<50):** Likely Mismatch.
+*   **Glass Box Scoring:** Click the Score Ring to see *exactly* why the AI gave that score (e.g., "Role Fit: 30/30", "Location: 0/20").
 
-#### 🟢 Reading the Results
-*   **The Score Ring (0-100):**
-    *   **Green (>80):** Perfect match. High priority.
-    *   **Yellow (50-79):** Good match, but maybe missing one skill or years of experience.
-    *   **Red (<50):** Likely a mismatch.
-*   **✨ The Glass Box Feature:**
-    *   **Click on the Score Ring** to see *why* it got that score.
-    *   It will show bars for: **Role Fit**, **Location**, **Experience**, and **Domain**.
-    *   *Example:* You might see "Role Fit: 30/30" but "Location: 0/20". This means the job is great, but they don't hire in your country.
-
-### Phase 4: Outreach Copilot
-Found a job you like? Don't just apply. **Network.**
-1.  Click **"✨ Draft Outreach"** on the job card.
-2.  (Optional) Enter the Hiring Manager's name if you found it on LinkedIn.
-3.  Click **"Generate Personalized Pitch"**.
-4.  The AI will generate:
-    *   A **Cold Email** bridging your specific past achievements to their company needs.
-    *   A **LinkedIn DM** shorter and punchier for connection requests.
+### 4. Outreach Copilot
+*   Found a job? Click **"✨ Draft Outreach"**.
+*   (Optional) Paste the Hiring Manager's name if you know it.
+*   Click **Generate**. The AI will write a personalized email bridging *your* specific past experience to *their* job requirements.
 
 ---
 
-## ❓ Troubleshooting & FAQs
+## ❓ Troubleshooting
 
-**Q: I see "No leads found matching criteria."**
-*   **Fix:** Your search might be too narrow.
-    *   Try removing "Red Lines".
-    *   Try adding broader locations (e.g., instead of just "Berlin", try "Germany" or "Remote").
-    *   Check your "Target Roles" - ensure you include synonyms (e.g., "Product Owner" AND "Product Manager").
+**"I see 'npm warn deprecated' in the terminal!"**
+*   **Ignore it.** This is just a notification for developers. If the command finished and you can type again, it was successful.
 
-**Q: The AI says "Quota Exceeded".**
-*   **Fix:** You ran out of credits on either Perplexity or Serper. Go to their websites and check your usage. Serper gives 2,500 free queries, but they eventually run out.
+**"The app says 'Quota Exceeded'"**
+*   You ran out of API credits. Check your Perplexity or Serper dashboard.
 
-**Q: It's not finding jobs in India.**
-*   **Fix:** Ensure your **Locations** field explicitly contains `India`, `Bengaluru`, `Mumbai`, etc. The system detects these keywords to enable the "India Portals" search cluster.
+**"It's not finding jobs in India"**
+*   Make sure you typed `India` or a specific Indian city in the **Locations** box during setup. This triggers the regional search engine.
 
-**Q: I refreshed the page and my results are gone!**
-*   **Feature:** For privacy, we store data in your browser's "Local Storage".
-*   **Fix:** The app *does* save your latest run. If you refresh, it should reload the last results. However, if you clear your browser cache, the data is deleted. **Always save your API keys in a password manager.**
+**"I want to reset everything"**
+*   Click the **Settings** button in the top right, then click **Factory Reset**. This deletes all keys and data so you can start fresh.
 
 ---
 
-## 🛡️ Privacy & Security
-
-*   **Local-First:** This app runs entirely in your browser.
-*   **No Database:** We (the developers) cannot see your resume, your API keys, or your job search history.
-*   **Direct Connection:** Your browser talks directly to Perplexity and Google. No middleman server.
-
----
-
-## 🤝 Contributing
-
-Found a bug? Want to add a new feature?
-1.  Open an Issue on GitHub.
-2.  Submit a Pull Request.
-
-Happy Hunting! 🎯
+## 🛡️ Privacy Note
+This app runs **locally on your computer**. We (the developers) cannot see your resume, your keys, or your job search. You are in full control.
