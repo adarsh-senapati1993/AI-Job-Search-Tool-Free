@@ -24,33 +24,72 @@ export interface SerperResult {
     source?: string;
 }
 
-export const performSerperSearch = async (apiKey: string, query: string): Promise<SerperResult[]> => {
+export const checkSerperQuota = async (apiKey: string, estimatedQueries: number): Promise<{ ok: boolean; remaining: number; msg?: string }> => {
     try {
+        // Lightweight check
         const response = await fetch('https://google.serper.dev/search', {
             method: 'POST',
-            headers: {
-                'X-API-KEY': apiKey,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                q: query,
-                num: 20, // Increased fetch size
-                // Removed "tbs" param to avoid conflicting with the "after:YYYY-MM-DD" query logic
-            })
+            headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ q: "test", num: 1 })
         });
-
-        if (!response.ok) throw new Error("Serper API Failed");
-        const data = await response.json();
         
-        return (data.organic || []).map((item: any) => ({
-            title: item.title,
-            link: item.link,
-            snippet: item.snippet,
-            date: item.date,
-            source: item.source
-        }));
+        const remainingStr = response.headers.get('X-RateLimit-Remaining') || '0'; // Serper headers might vary, but usually they don't expose credits easily via headers. 
+        // Serper doesn't strictly expose "credits remaining" via headers in all plans. 
+        // However, a 403 or 402 would indicate failure.
+        
+        if (response.status === 403 || response.status === 402) {
+            return { ok: false, remaining: 0, msg: "Quota Exceeded or Invalid Key" };
+        }
+        
+        // Since we can't get exact credits from headers easily in free tier, we rely on status.
+        return { ok: true, remaining: 9999 }; 
     } catch (e) {
-        console.error("Serper Search Error", e);
-        return [];
+        return { ok: false, remaining: 0, msg: "Connection Failed" };
     }
+};
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export const performSerperSearch = async (apiKey: string, query: string, start: number = 0, retries = 3): Promise<SerperResult[]> => {
+    for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            const response = await fetch('https://google.serper.dev/search', {
+                method: 'POST',
+                headers: {
+                    'X-API-KEY': apiKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    q: query,
+                    num: 20, 
+                    start: start 
+                })
+            });
+
+            if (response.status === 429) {
+                const delay = 1000 * Math.pow(2, attempt + 1);
+                console.warn(`Serper Rate Limit 429. Retrying in ${delay}ms...`);
+                await wait(delay);
+                continue;
+            }
+
+            if (!response.ok) throw new Error(`Serper API Error: ${response.status}`);
+            const data = await response.json();
+            
+            return (data.organic || []).map((item: any) => ({
+                title: item.title,
+                link: item.link,
+                snippet: item.snippet,
+                date: item.date,
+                source: item.source
+            }));
+        } catch (e: any) {
+            if (attempt === retries - 1) {
+                console.error("Serper Search Failed Final", e);
+                return [];
+            }
+            await wait(1000 * (attempt + 1));
+        }
+    }
+    return [];
 };

@@ -28,7 +28,7 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
       setLoading(true);
       setError(null);
       try {
-        const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || getKey(STORAGE_KEYS.GEMINI_KEY) || "dummy";
+        const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
         const config = getConfig();
         if (!config) throw new Error("Configuration missing");
 
@@ -42,6 +42,7 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
         setDrafts(result);
         setShowDrafts(true);
       } catch (err: any) {
+        console.error("Outreach Generation Error:", err);
         setError(err.message || "Failed to generate drafts");
       } finally {
         setLoading(false);
@@ -119,7 +120,11 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
                       </div>
                   </div>
 
-                  {error && <p className="text-red-400 text-sm">{error}</p>}
+                  {error && (
+                    <div className="bg-red-500/10 border border-red-500/50 p-3 rounded text-red-300 text-sm">
+                        {error}
+                    </div>
+                  )}
 
                   <Button 
                     onClick={generateDrafts} 

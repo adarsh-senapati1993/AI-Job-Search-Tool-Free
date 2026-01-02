@@ -4,8 +4,6 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { getKey, saveKey, STORAGE_KEYS, clearKeys } from '../lib/storage';
 import { verifyPerplexityKey } from '../lib/perplexity';
-import { verifyGeminiKey } from '../lib/api-utils';
-import { verifyOpenAIKey } from '../lib/openai';
 import { verifySerperKey } from '../lib/serper';
 
 interface SettingsProps {
@@ -15,54 +13,25 @@ interface SettingsProps {
 
 export const Settings = ({ onClose, onReset }: SettingsProps) => {
   const [activeTab, setActiveTab] = useState<'brain' | 'eyes'>('brain');
-  const [provider, setProvider] = useState('perplexity');
   const [llmKey, setLlmKey] = useState('');
   const [serperKey, setSerperKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   useEffect(() => {
-    const p = getKey(STORAGE_KEYS.LLM_PROVIDER) || 'perplexity';
-    setProvider(p);
-    
-    let key = '';
-    if (p === 'gemini') key = getKey(STORAGE_KEYS.GEMINI_KEY) || '';
-    if (p === 'openai') key = getKey(STORAGE_KEYS.OPENAI_KEY) || '';
-    if (p === 'perplexity') key = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || '';
-    if (p === 'ollama') key = getKey(STORAGE_KEYS.OLLAMA_URL) || '';
-    setLlmKey(key);
-
+    setLlmKey(getKey(STORAGE_KEYS.PERPLEXITY_KEY) || '');
     setSerperKey(getKey(STORAGE_KEYS.SERPER_KEY) || '');
   }, []);
 
   const handleSaveBrain = async () => {
     setIsLoading(true); setStatus(null);
-    let valid = false;
-    let msg = '';
+    const res = await verifyPerplexityKey(llmKey);
 
-    // Verify based on provider
-    if (provider === 'perplexity') {
-        const res = await verifyPerplexityKey(llmKey);
-        valid = res.isValid; msg = res.error || '';
-    } else if (provider === 'gemini') {
-        const res = await verifyGeminiKey(llmKey);
-        valid = res.success; msg = res.message;
-    } else if (provider === 'openai') {
-        const res = await verifyOpenAIKey(llmKey);
-        valid = res.isValid; msg = res.error || '';
+    if (res.isValid) {
+        saveKey(STORAGE_KEYS.PERPLEXITY_KEY, llmKey);
+        setStatus({ type: 'success', message: 'Perplexity Connected!' });
     } else {
-        valid = true; // Ollama loose check
-    }
-
-    if (valid) {
-        saveKey(STORAGE_KEYS.LLM_PROVIDER, provider);
-        if (provider === 'gemini') saveKey(STORAGE_KEYS.GEMINI_KEY, llmKey);
-        if (provider === 'openai') saveKey(STORAGE_KEYS.OPENAI_KEY, llmKey);
-        if (provider === 'perplexity') saveKey(STORAGE_KEYS.PERPLEXITY_KEY, llmKey);
-        if (provider === 'ollama') saveKey(STORAGE_KEYS.OLLAMA_URL, llmKey);
-        setStatus({ type: 'success', message: 'Brain Updated!' });
-    } else {
-        setStatus({ type: 'error', message: `Verification Failed: ${msg}` });
+        setStatus({ type: 'error', message: `Verification Failed: ${res.error}` });
     }
     setIsLoading(false);
   };
@@ -95,39 +64,30 @@ export const Settings = ({ onClose, onReset }: SettingsProps) => {
           <h2 className="text-xl font-bold text-white mb-6">⚙️ System Settings</h2>
           
           <div className="flex border-b border-slate-700 mb-6">
-              <button onClick={() => setActiveTab('brain')} className={`flex-1 pb-2 border-b-2 transition-colors ${activeTab === 'brain' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400'}`}>🧠 Intelligence</button>
-              <button onClick={() => setActiveTab('eyes')} className={`flex-1 pb-2 border-b-2 transition-colors ${activeTab === 'eyes' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400'}`}>👀 Search (Eyes)</button>
+              <button onClick={() => setActiveTab('brain')} className={`flex-1 pb-2 border-b-2 transition-colors ${activeTab === 'brain' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400'}`}>🧠 Intelligence (Perplexity)</button>
+              <button onClick={() => setActiveTab('eyes')} className={`flex-1 pb-2 border-b-2 transition-colors ${activeTab === 'eyes' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400'}`}>👀 Search (Serper)</button>
           </div>
           
           <div className="space-y-6">
             {activeTab === 'brain' ? (
                 <div className="space-y-4">
-                    <div className="space-y-1">
-                        <label className="text-xs text-slate-400">Provider</label>
-                        <select 
-                            value={provider} 
-                            onChange={e => {
-                                setProvider(e.target.value);
-                                setLlmKey(''); // Clear key on provider switch for safety
-                            }}
-                            className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white"
-                        >
-                            <option value="perplexity">Perplexity</option>
-                            <option value="gemini">Google Gemini</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="ollama">Ollama</option>
-                        </select>
-                    </div>
+                    <p className="text-sm text-slate-400">
+                        We use <strong>Perplexity Pro (Sonar Reasoning)</strong> for deep analysis and reasoning.
+                    </p>
                     <Input
-                        label="API Key / URL"
-                        type={provider === 'ollama' ? 'text' : 'password'}
+                        label="Perplexity API Key"
+                        type="password"
                         value={llmKey}
                         onChange={(e) => setLlmKey(e.target.value)}
+                        placeholder="pplx-..."
                     />
                     <Button onClick={handleSaveBrain} isLoading={isLoading} className="w-full">Update Brain</Button>
                 </div>
             ) : (
                 <div className="space-y-4">
+                    <p className="text-sm text-slate-400">
+                        We use <strong>Serper (Google Search API)</strong> for high-speed raw job discovery.
+                    </p>
                     <Input
                         label="Serper API Key"
                         type="password"

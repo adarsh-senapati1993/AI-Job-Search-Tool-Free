@@ -4,27 +4,28 @@ import { SetupWizard } from './components/SetupWizard';
 import { ProfileConfig } from './components/ProfileConfig';
 import { Settings } from './components/Settings';
 import { DiscoveryFeed } from './components/DiscoveryFeed';
-import { ChatBot } from './components/ChatBot';
-import { hasRequiredKeys, getConfig, getKey, STORAGE_KEYS } from './lib/storage';
+import { hasRequiredKeys, getConfig, getKey, STORAGE_KEYS, clearKeys, backupKeys } from './lib/storage';
 import { Card } from './components/ui/Card';
 import { Button } from './components/ui/Button';
 
 interface DashboardProps {
   onEditConfig: () => void;
+  onRestart: () => void;
+  onFactoryReset: () => void;
 }
 
-const Dashboard = ({ onEditConfig }: DashboardProps) => {
+const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) => {
   const [config, setConfig] = useState<any>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [provider, setProvider] = useState<string>('Unknown');
 
   useEffect(() => {
     setConfig(getConfig());
-    setProvider(getKey(STORAGE_KEYS.LLM_PROVIDER) || 'Unknown');
   }, []);
 
-  const handleReset = () => {
-    window.location.reload();
+  const handleRestartClick = () => {
+    if (confirm("⚠️ SYSTEM RESTART\n\nThis will reboot the system and return you to the initialization screen.\n\nYour API Keys will be pre-filled to save time.\n\nProceed?")) {
+        onRestart();
+    }
   };
 
   if (!config) return null;
@@ -39,7 +40,7 @@ const Dashboard = ({ onEditConfig }: DashboardProps) => {
               Job Radar Command
             </h1>
             <p className="text-slate-400 text-sm mt-1 uppercase tracking-wider font-mono">
-              <span className="text-emerald-400">● Online</span> | Brain: {provider} | Eyes: Serper
+              <span className="text-emerald-400">● Online</span> | Brain: Perplexity Sonar | Eyes: Serper
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -50,10 +51,10 @@ const Dashboard = ({ onEditConfig }: DashboardProps) => {
               Settings
             </button>
             <button 
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium border border-slate-700 transition-colors"
+              onClick={handleRestartClick}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium border border-slate-700 transition-colors text-amber-400 hover:text-amber-300 border-amber-900/30"
             >
-              Refresh
+              Restart
             </button>
           </div>
         </div>
@@ -137,8 +138,12 @@ const Dashboard = ({ onEditConfig }: DashboardProps) => {
 
       </div>
       
-      {showSettings && <Settings onClose={() => setShowSettings(false)} onReset={handleReset} />}
-      <ChatBot />
+      {showSettings && (
+          <Settings 
+            onClose={() => setShowSettings(false)} 
+            onReset={onFactoryReset} 
+          />
+      )}
     </div>
   );
 };
@@ -162,7 +167,23 @@ const App = () => {
     checkState();
   }, []);
 
-  if (appState === 'loading') return null;
+  // Soft Restart: Backs up keys, clears current session, goes to setup (pre-filled)
+  const handleSoftRestart = () => {
+    backupKeys();
+    clearKeys();
+    setAppState('loading');
+    setTimeout(() => setAppState('setup'), 100);
+  };
+
+  // Factory Reset: Wipes everything including backups
+  const handleFactoryReset = () => {
+    clearKeys(); 
+    localStorage.removeItem(STORAGE_KEYS.KEY_BACKUP);
+    setAppState('loading');
+    setTimeout(() => setAppState('setup'), 100);
+  };
+
+  if (appState === 'loading') return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">System Initializing...</div>;
 
   return (
     <>
@@ -174,7 +195,11 @@ const App = () => {
             onBack={() => setAppState('setup')} 
         />
       ) : (
-        <Dashboard onEditConfig={() => setAppState('config')} />
+        <Dashboard 
+            onEditConfig={() => setAppState('config')} 
+            onRestart={handleSoftRestart}
+            onFactoryReset={handleFactoryReset}
+        />
       )}
     </>
   );

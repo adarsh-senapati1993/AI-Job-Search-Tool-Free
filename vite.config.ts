@@ -8,10 +8,13 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
-        '/api/perplexity': {
-          target: 'https://api.perplexity.ai',
+        // We removed /api/perplexity proxy because direct calls are more stable.
+        
+        // Keep Ollama proxy for local development (CORS is often stricter on localhost:11434)
+        '/ollama_proxy': {
+          target: 'http://127.0.0.1:11434',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/perplexity/, ''),
+          rewrite: (path) => path.replace(/^\/ollama_proxy/, ''),
           secure: false,
         },
       },

@@ -1,110 +1,74 @@
+import { safeJSONParse } from "./api-utils";
+
+const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
+
 export const verifyPerplexityKey = async (apiKey: string): Promise<{ isValid: boolean; error?: string }> => {
+  const controller = new AbortController();
+  // 10 second timeout for verification
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
   try {
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+    const response = await fetch(PERPLEXITY_API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "sonar",
-        messages: [
-          { role: "system", content: "Be concise." },
-          { role: "user", content: "Ping" }
-        ]
-      })
+        model: "sonar", 
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1
+      }),
+      signal: controller.signal
     });
-    
+
+    clearTimeout(timeoutId);
+
     if (response.ok) return { isValid: true };
+    
+    if (response.status === 401) {
+         return { isValid: false, error: "Invalid API Key (Access Denied)" };
+    }
+
     const errText = await response.text();
     return { isValid: false, error: `API Error: ${response.status} - ${errText}` };
+
   } catch (e: any) {
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') {
+        return { isValid: false, error: "Connection Timed Out (Check Internet)" };
+    }
     return { isValid: false, error: e.message || "Network Error" };
   }
 };
 
-/**
- * Robustly extracts JSON from a string that might contain Markdown code blocks,
- * conversational text, or citations (e.g. [1]).
- */
-function extractJSON(text: string): string {
-    // 1. Try to extract from markdown code blocks first (most reliable)
-    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
-    const match = text.match(codeBlockRegex);
-    if (match) {
-        return match[1].trim();
-    }
-
-    // 2. If no code block, find the first valid JSON start character ({ or [)
-    const firstBrace = text.indexOf('{');
-    const firstBracket = text.indexOf('[');
-    
-    let start = -1;
-    let type = ''; // 'object' or 'array'
-
-    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
-        start = firstBrace;
-        type = 'object';
-    } else if (firstBracket !== -1) {
-        start = firstBracket;
-        type = 'array';
-    }
-
-    if (start === -1) return text; // No JSON structure found
-
-    // 3. Stack-based extraction to find the matching closing bracket
-    // This ignores trailing text/citations like " ... see [1]"
-    let balance = 0;
-    let inString = false;
-    let escaped = false;
-    
-    for (let i = start; i < text.length; i++) {
-        const char = text[i];
-        
-        if (escaped) {
-            escaped = false;
-            continue;
-        }
-
-        if (char === '\\') {
-            escaped = true;
-            continue;
-        }
-
-        if (char === '"') {
-            inString = !inString;
-            continue;
-        }
-
-        if (!inString) {
-            if (type === 'object') {
-                if (char === '{') balance++;
-                if (char === '}') balance--;
-            } else {
-                if (char === '[') balance++;
-                if (char === ']') balance--;
-            }
-
-            // When balance hits zero, we found the end of the JSON structure
-            if (balance === 0) {
-                return text.substring(start, i + 1);
-            }
+// Retry logic wrapper
+async function withRetry<T>(operation: () => Promise<T>, retries = 3): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await operation();
+        } catch (e: any) {
+            if (i === retries - 1) throw e;
+            // If 429 (Rate Limit), wait longer. If 5xx, wait shorter.
+            const isRateLimit = e.message.includes('429');
+            const delay = isRateLimit ? 5000 * (i + 1) : 1000 * (i + 1);
+            console.warn(`Perplexity Retry ${i + 1}/${retries} (Wait ${delay}ms)...`);
+            await new Promise(r => setTimeout(r, delay));
         }
     }
-    
-    // Fallback: If loop finishes without balance=0, return from start to end
-    return text.substring(start);
+    throw new Error("Max retries exceeded");
 }
 
 export const generatePerplexityJSON = async (apiKey: string, prompt: string, model = "sonar"): Promise<any> => {
-    try {
-        const finalPrompt = `${prompt}
-        
-        CRITICAL INSTRUCTION: Return ONLY a valid JSON object or array.
-        You may wrap it in a markdown code block (optional).
-        Ensure all strings are properly escaped.`;
+    return withRetry(async () => {
+        // SYSTEM PROMPT ENGINEERING:
+        // Perplexity's Llama-based models need strict JSON reinforcement in the system prompt.
+        const systemPrompt = `You are a strict JSON API. 
+        You NEVER output conversational text. 
+        You ONLY output a valid JSON object or array.
+        If you cannot extract data, return null or empty array.`;
 
-        const response = await fetch('https://api.perplexity.ai/chat/completions', {
+        const response = await fetch(PERPLEXITY_API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -113,10 +77,10 @@ export const generatePerplexityJSON = async (apiKey: string, prompt: string, mod
             body: JSON.stringify({
                 model: model,
                 messages: [
-                    { role: "system", content: "You are a strict JSON data generator." },
-                    { role: "user", content: finalPrompt }
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: prompt }
                 ],
-                temperature: 0.1 
+                temperature: 0.1 // Low temp for deterministic JSON
             })
         });
 
@@ -128,29 +92,17 @@ export const generatePerplexityJSON = async (apiKey: string, prompt: string, mod
         const data = await response.json();
         const rawContent = data.choices[0]?.message?.content || "{}";
         
-        // Use the robust extractor
-        const cleanContent = extractJSON(rawContent);
-
-        try {
-            return JSON.parse(cleanContent);
-        } catch (parseError) {
-            console.error("JSON Parse Error. Raw Content:", rawContent);
-            console.error("Attempted Clean Content:", cleanContent);
-            throw new Error(`Failed to parse Perplexity response as JSON. The model might have returned conversational text.`);
-        }
-    } catch (e) {
-        console.error("Perplexity JSON Error", e);
-        throw e;
-    }
+        return safeJSONParse(rawContent);
+    });
 };
 
-export const generatePerplexityText = async (apiKey: string, messages: any[], model = "sonar", systemInstruction?: string): Promise<string> => {
-    try {
+export const generatePerplexityText = async (apiKey: string, messages: any[], model = "sonar-pro", systemInstruction?: string): Promise<string> => {
+    return withRetry(async () => {
         const msgs = systemInstruction 
             ? [{ role: "system", content: systemInstruction }, ...messages]
             : messages;
 
-        const response = await fetch('https://api.perplexity.ai/chat/completions', {
+        const response = await fetch(PERPLEXITY_API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -167,8 +119,5 @@ export const generatePerplexityText = async (apiKey: string, messages: any[], mo
         
         const data = await response.json();
         return data.choices[0]?.message?.content || "";
-    } catch (e) {
-        console.error("Perplexity Text Error", e);
-        throw e;
-    }
+    });
 };

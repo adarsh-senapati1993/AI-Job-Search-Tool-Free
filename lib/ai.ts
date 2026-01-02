@@ -1,7 +1,7 @@
 import { getActiveLLM } from "./llm";
 
 export interface CandidateProfile {
-  professional_bio: string; // Detailed narrative
+  professional_bio: string; 
   target_roles: string[];
   seniority_level: string;
   locations: string[];
@@ -10,6 +10,7 @@ export interface CandidateProfile {
   avoid_keywords: string[];
   achievements: string[];
   search_lookback?: string; 
+  search_depth?: 'standard' | 'deep' | 'comprehensive'; 
 }
 
 export interface ExplicitConstraints {
@@ -35,7 +36,7 @@ export interface OutreachDrafts {
 export interface HiringManagerContext {
     name?: string;
     linkedinUrl?: string;
-    context?: string; // e.g. "He posted about scaling challenges"
+    context?: string; 
 }
 
 export const parseCandidateProfile = async (
@@ -45,60 +46,62 @@ export const parseCandidateProfile = async (
 ): Promise<CandidateProfile> => {
     
     const llm = getActiveLLM();
-    const content = inputs.text || "No resume content provided. Please infer best guess from constraints.";
+    const content = inputs.text || "";
 
+    // PERPLEXITY PROMPT STRATEGY:
+    // We use "sonar-reasoning-pro" (Chain of Thought).
+    // We explicitly request verbosity for the bio to avoid "short/non-contextual" summaries.
+    
     const prompt = `
-    Act as a World-Class Executive Recruiter. 
-    Analyze the provided Candidate Resume/Bio Raw Text deep semantic understanding.
+    TASK: DEEP CANDIDATE ANALYSIS
     
-    RAW DATA:
+    RESUME / RAW DATA:
     ${content}
-    ${inputs.linkedinUrl ? `LinkedIn: ${inputs.linkedinUrl}` : ''}
+    ${inputs.linkedinUrl ? `LINKEDIN URL: ${inputs.linkedinUrl}` : ''}
     
-    USER CONSTRAINTS (Overrides):
-    - Target Roles: ${constraints.roles || "Infer from experience"}
-    - Locations: ${constraints.locations || "Infer"}
-    - Industries: ${constraints.industries || "Infer"}
-    - Skills: ${constraints.skills || "Infer"}
-    - Avoid: ${constraints.avoid || "None"}
+    USER OVERRIDES (Must be prioritized):
+    Target Roles: ${constraints.roles || "Infer from experience"}
+    Target Locations: ${constraints.locations || "Infer"}
+    Target Industries: ${constraints.industries || "Infer"}
+    Key Skills: ${constraints.skills || "Infer"}
+    Avoid/Red Lines: ${constraints.avoid || "None"}
 
-    OBJECTIVES:
-    1. PROFESSIONAL BIO: Write a detailed "Candidate Bio" (150-250 words) that captures their career narrative, core strengths, unique value proposition, and technical depth. This will be used to match them against complex Job Descriptions.
-    2. ACHIEVEMENTS: Extract 5-7 "Brag Sheet" bullet points (Action + Metric + Result).
-    3. STRUCTURE: Extract clean structured targeting data.
+    INSTRUCTIONS:
+    1. Analyze the candidate's career trajectory, key achievements, and specific domain expertise.
+    2. Construct a "Strategic Narrative" bio. This must be a comprehensive 150-200 word paragraph. Mention specific metrics, technologies, and leadership scope. DO NOT be concise.
+    3. Infer the correct Seniority Level based on years of experience and leadership scope.
+    4. GENERATE SEARCH SYNONYMS: Create a comprehensive list of "target_roles".
+       - If user says "PM", expand to ["Product Manager", "Technical Product Manager", "Product Owner"].
+       - IMPORTANT: Respect Seniority. If candidate is "Senior", DO NOT include "Junior" or "Associate" roles.
     
-    Output JSON structure:
+    OUTPUT JSON SCHEMA:
     {
-      "professional_bio": "Detailed narrative summary...",
-      "target_roles": ["role1", "role2"],
-      "seniority_level": "Senior/Staff/Lead etc",
-      "locations": ["loc1"],
-      "skills": ["skill1"],
-      "industries": ["ind1"],
-      "avoid_keywords": ["bad1"],
-      "achievements": ["achieve1", "achieve2"]
+      "professional_bio": "A comprehensive, 150-200 word strategic narrative. Highlight leadership scope, technical depth, and specific achievements. Do not be generic.",
+      "target_roles": ["Role 1", "Role 2", "Role 3"],
+      "seniority_level": "e.g. Senior, Staff, Principal, VP",
+      "locations": ["e.g. Remote", "London"],
+      "skills": ["Hard Skill 1", "Hard Skill 2", ...],
+      "industries": ["Industry 1", "Industry 2"],
+      "avoid_keywords": ["Keyword to avoid"],
+      "achievements": ["Metric-driven achievement 1", "Metric-driven achievement 2", ...]
     }
     `;
 
-    return await llm.generateJSON(prompt, "sonar-pro"); 
+    // Use 'sonar-reasoning-pro' for deep analysis on the profile
+    // Fallback logic in LLMClient will handle if this specific model is unavailable
+    return await llm.generateJSON(prompt, "sonar-reasoning-pro"); 
 };
 
 export const refineConfiguration = async (currentConfig: any, instruction: string): Promise<any> => {
     const llm = getActiveLLM();
     const prompt = `
-    Current Search Configuration (JSON):
-    ${JSON.stringify(currentConfig, null, 2)}
-
-    User Instruction: "${instruction}"
-
-    Task: Update the configuration JSON based strictly on the user's instruction.
-    - If they say "add location X", add it to locations.
-    - If they say "remove crypto", add "crypto" to avoid_keywords.
-    - If they say "focus on Series A", maybe add "Series A" to industries or keywords? (Use best judgment).
+    Config: ${JSON.stringify(currentConfig)}
+    User Request: "${instruction}"
     
-    Return ONLY the updated JSON object. Do not lose existing data unless explicitly asked to remove.
+    ACTION: Update the Config JSON based on the User Request.
+    Return ONLY the updated JSON.
     `;
-    return await llm.generateJSON(prompt);
+    return await llm.generateJSON(prompt, "sonar");
 };
 
 export const generateOutreachDrafts = async (
@@ -108,47 +111,44 @@ export const generateOutreachDrafts = async (
     hmContext?: HiringManagerContext
 ): Promise<OutreachDrafts> => {
     const llm = getActiveLLM();
-    const proofPoints = userConfig.achievements?.join('\n- ') || userConfig.skills.join(', ');
+    const proof = userConfig.achievements?.slice(0,3).join('; ') || "";
     
-    const hmName = hmContext?.name || "Hiring Manager";
-    const hmInfo = hmContext?.context ? `Context about Hiring Manager (${hmName}): ${hmContext.context}` : "";
-    const hmUrl = hmContext?.linkedinUrl ? `HM Profile Link: ${hmContext.linkedinUrl}` : "";
-
     const prompt = `
-    TASK: Write a Senior-Level Outreach (LinkedIn DM & Email).
+    TASK: GENERATE HIGH-CONVERSION OUTREACH
     
-    TARGET PERSONA:
-    Name: ${hmName}
-    ${hmInfo}
-    ${hmUrl}
+    CONTEXT:
+    Candidate Bio: ${userConfig.professional_bio}
+    Top Achievements: ${proof}
+    
+    TARGET:
+    Role: ${lead.role_title} @ ${lead.company_name}
+    Job Insights: ${JSON.stringify(lead.pros || [])}
+    
+    RECIPIENT:
+    Name: ${hmContext?.name || "Hiring Manager"}
+    Context: ${hmContext?.context || "None"}
 
-    JOB CONTEXT:
-    Role: ${lead.role_title} at ${lead.company_name}
-    Job Snippet: "${lead.snippet}"
-    Specific Pain Point Identified: "${lead.outreach_hook || "Unknown"}"
-
-    CANDIDATE PROOF POINTS:
-    - ${proofPoints}
+    INSTRUCTIONS:
+    1. Write a LinkedIn DM (short, casual, connection request style).
+    2. Write a Cold Email (Subject + Body).
+    3. Use a specific "Hook" based on the company or job insights.
+    4. NO generic fluff ("I am passionate about..."). Go straight to value.
     
-    TONE & STYLE (CRITICAL - "Anti-AI"):
-    - Write as a peer (Senior to Senior), not a desperate applicant.
-    - NO fluff ("I hope this finds you well", "I am excited to apply").
-    - NO generic praise ("Your company is a market leader").
-    - Be specific. Link the candidate's specific achievement to the Job's specific pain point.
-    - Keep it short.
-    
-    Output JSON with 3 fields:
-    1. linkedin_dm (< 75 words. Hook + Proof + Low friction ask).
-    2. email_subject (Specific, < 8 words. e.g. "Growth at Stripe / Ex-Paypal Lead").
-    3. email_body (< 150 words. Connect the dots between HM's problem and Candidate's solution).
+    OUTPUT JSON:
+    {
+      "linkedin_dm": "Message text...",
+      "email_subject": "Subject line...",
+      "email_body": "Email body..."
+    }
     `;
 
-    return await llm.generateJSON(prompt);
+    return await llm.generateJSON(prompt, "sonar-pro");
 };
 
 export const chatWithAI = async (message: string, history: any[], systemInstruction: string): Promise<string> => {
     const llm = getActiveLLM();
     
+    // Perplexity/OpenAI format
     const messages = history.map((h: any) => ({
         role: h.role === 'model' ? 'assistant' : 'user',
         content: h.parts ? h.parts[0].text : h.text 
@@ -156,10 +156,12 @@ export const chatWithAI = async (message: string, history: any[], systemInstruct
     
     messages.push({ role: 'user', content: message });
 
-    return await llm.generateText(messages, systemInstruction);
+    return await llm.generateText(messages, systemInstruction, "sonar-reasoning-pro");
 };
 
 export const generateScoringJSON = async (prompt: string): Promise<any> => {
     const llm = getActiveLLM();
-    return await llm.generateJSON(prompt);
+    // Use 'sonar' (Llama 3.1 8B/70B) for faster batch processing. 
+    // It is significantly faster than reasoning models.
+    return await llm.generateJSON(prompt, "sonar");
 }

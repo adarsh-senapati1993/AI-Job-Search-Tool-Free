@@ -1,5 +1,5 @@
 import { generateScoringJSON } from "./ai";
-import { RawSignal } from './discovery';
+import { RawSignal, extractCompanyFromUrl } from './discovery';
 
 export interface ScoreBreakdown {
     role: number;
@@ -22,187 +22,134 @@ export interface ScoredLead extends RawSignal {
   salary?: string;
   urgency_score: number;
   urgency_signals: string[];
-  why_you_match?: string;
-  outreach_hook?: string;
+  pros: string[]; 
+  cons: string[]; 
 }
 
-const extractUrgencySignals = (snippet: string) => {
+const extractUrgencySignals = (snippet: string, title: string) => {
     const urgency = { score: 0, signals: [] as string[] };
-    const lower = snippet.toLowerCase();
+    const text = (snippet + " " + title).toLowerCase();
     
-    if (lower.match(/\b(urgent|immediate|asap|hiring now|start date)\b/)) {
-        urgency.score += 20;
-        urgency.signals.push("🔥 Urgent Hire");
-    }
-    if (lower.match(/\b(just posted|newly listed|fresh|today)\b/)) {
-        urgency.score += 10;
-        urgency.signals.push("✨ Just Posted");
-    }
-    return urgency;
-};
+    // V2 Patterns
+    const patterns = [
+        { regex: /\b(urgent|immediate|asap|quickly)\b/i, score: 20, label: "🔥 Urgent" },
+        { regex: /\bhiring now\b/i, score: 15, label: "⚡ Active" },
+        { regex: /\bclosing (soon|friday|this week)\b/i, score: 15, label: "⏳ Closing Soon" },
+        { regex: /\bjust posted\b/i, score: 5, label: "✨ Fresh" },
+        { regex: /\bfew applicants\b/i, score: 10, label: "📉 Low Competition" }
+    ];
 
-// DETERMINISTIC COMPANY EXTRACTION FROM URL
-// Solves the "Not Specified" hallucination problem by looking at the domain/path first.
-export const extractCompanyFromUrl = (url: string): string | null => {
-    try {
-        const u = new URL(url);
-        const host = u.hostname.toLowerCase();
-        const path = u.pathname;
-
-        // 1. ATS Systems (High Confidence)
-        // boards.greenhouse.io/airbnb/...
-        if (host.includes('greenhouse.io') || host.includes('lever.co') || host.includes('ashbyhq.com') || host.includes('workable.com')) {
-            const parts = path.split('/').filter(p => p);
-            if (parts.length > 0) return capitalize(parts[0]);
+    patterns.forEach(p => {
+        if (p.regex.test(text)) {
+            urgency.score += p.score;
+            if (!urgency.signals.includes(p.label)) urgency.signals.push(p.label);
         }
-        
-        // 2. Subdomains (careers.stripe.com)
-        if (host.startsWith('careers.') || host.startsWith('jobs.') || host.startsWith('join.')) {
-            const parts = host.split('.');
-            if (parts.length >= 3) return capitalize(parts[1]); 
-        }
-        
-        // 3. Workday (stripe.myworkdayjobs.com)
-        if (host.includes('myworkdayjobs.com')) {
-            const company = host.split('.')[0];
-            return capitalize(company);
-        }
-
-        return null;
-    } catch (e) {
-        return null;
-    }
-};
-
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// Helper to split array into chunks
-function chunkArray<T>(array: T[], size: number): T[][] {
-    const chunks = [];
-    for (let i = 0; i < array.length; i += size) {
-        chunks.push(array.slice(i, i + size));
-    }
-    return chunks;
-}
-
-export const scoreSignals = async (signals: RawSignal[], userConfig: any): Promise<ScoredLead[]> => {
-  if (signals.length === 0) return [];
-
-  // BATCH PROCESSING ENGINE
-  const BATCH_SIZE = 5;
-  const batches = chunkArray(signals, BATCH_SIZE);
-  const results: ScoredLead[] = [];
-
-  const processBatch = async (batch: RawSignal[]): Promise<ScoredLead[]> => {
-    // Pre-calculate companies to help the AI
-    const batchWithContext = batch.map(s => {
-        const extracted = extractCompanyFromUrl(s.url);
-        return {
-            ...s,
-            extractedCompany: extracted
-        };
     });
 
-    const jobsList = batchWithContext.map((s) => `[ID: ${s.id}]
-    Snippet: ${s.snippet.slice(0, 400)}
-    URL: ${s.url}
-    ${s.extractedCompany ? `Host/Company: ${s.extractedCompany}` : ''}`).join('\n\n');
+    return { score: Math.min(urgency.score, 30), signals: urgency.signals };
+};
 
-    const prompt = `
-    BATCH JOB SCORING TASK.
-    
-    CANDIDATE PROFILE:
-    - Bio: ${userConfig.professional_bio || "N/A"}
-    - Target Roles: ${userConfig.target_roles.join(', ')}
-    - Locations: ${userConfig.locations.join(', ')}
-    - Seniority: ${userConfig.seniority_level}
-    - Avoid: ${userConfig.avoid_keywords.join(', ')}
-    
-    JOBS TO ANALYZE:
-    ${jobsList}
-    
-    INSTRUCTIONS:
-    Analyze each job against the profile.
-    Return a JSON ARRAY of objects (one for each ID).
-    
-    SCORING RUBRIC (Max 100):
-    1. Role Match (30): 0 if totally unrelated.
-    2. Location Match (20): 0 if mismatch.
-    3. Seniority (20): 0 if too junior/senior.
-    4. Skills/Domain (30): Bio fit.
-    
-    OUTPUT SCHEMA per item:
-    {
-      "id": "must match input ID",
-      "match_score": number (0-100),
-      "company_name": "extracted name (prioritize URL/Host if available)",
-      "role_title": "extracted",
-      "decision": "APPROVE" (>70) or "REJECT",
-      "reasoning": "Short 1 sentence why",
-      "salary": "extracted or 'Not disclosed'",
-      "why_you_match": "1 sentence on why the candidate fits specifically",
-      "outreach_hook": "1 specific business pain point to mention in an email"
-    }
-    `;
+const calculateDaysSincePosted = (dateStr?: string): number => {
+    if (!dateStr) return 0;
+    const lower = dateStr.toLowerCase();
+    if (lower.includes('hour') || lower.includes('minute')) return 0;
+    const match = lower.match(/(\d+)\s+day/);
+    return match ? parseInt(match[1]) : 0;
+};
 
-    try {
-      const response = await generateScoringJSON(prompt);
-      const dataArray = Array.isArray(response) ? response : [response];
+export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProgress?: (msg: string) => void): Promise<ScoredLead[]> => {
+  if (signals.length === 0) return [];
+
+  // Optimized Batch Size
+  const JOBS_PER_PROMPT = 20; 
+  const chunks = [];
+  for (let i = 0; i < signals.length; i += JOBS_PER_PROMPT) chunks.push(signals.slice(i, i + JOBS_PER_PROMPT));
+
+  const results: ScoredLead[] = [];
+  let processedChunks = 0;
+
+  const processChunk = async (chunk: RawSignal[]): Promise<ScoredLead[]> => {
+      const jobsList = chunk.map(s => `ID: ${s.id} | TITLE: ${s.title} | LINK: ${s.url} | SNIPPET: ${s.snippet.slice(0, 600)}`).join('\n\n');
+
+      const prompt = `
+      ACT AS: Strict Technical Recruiter.
+      CANDIDATE: Roles: ${userConfig.target_roles.join(', ')} | Locs: ${userConfig.locations.join(', ')} | Skills: ${userConfig.skills?.slice(0,8).join(', ')}
       
-      return batchWithContext.map(signal => {
-          const analysis = dataArray.find((d: any) => d.id === signal.id) || {};
-          const score = analysis.match_score || 0;
-          const urgency = extractUrgencySignals(signal.snippet);
-          
-          // Fallback: If AI fails to find company, use our extracted one, or 'Not specified'
-          let finalCompany = analysis.company_name;
-          if ((!finalCompany || finalCompany.toLowerCase() === 'not specified' || finalCompany.toLowerCase() === 'unknown') && signal.extractedCompany) {
-              finalCompany = signal.extractedCompany;
-          }
-          if (!finalCompany) finalCompany = "Not specified";
+      JOBS:
+      ${jobsList}
+      
+      TASK: Analyze each job. Return JSON array "results".
+      
+      RULES:
+      1. STRICT ROLE MATCH: If title does NOT match Target Roles (e.g. "Product Owner" != "Product Manager"), set "is_role_match": false.
+      2. SALARY: Extract if present. Format: "USD 150k-200k" or "Not disclosed".
+      3. SCORE: 0-100. Be critical.
+      
+      SCHEMA:
+      {
+        "id": "string",
+        "is_role_match": boolean,
+        "match_score": number,
+        "company_name": "string",
+        "role_title": "string",
+        "salary": "string",
+        "pros": ["string"],
+        "cons": ["string"],
+        "decision": "APPROVE" | "REJECT"
+      }
+      `;
 
-          return {
-              ...signal,
-              score: score,
-              breakdown: { role: 0, location: 0, experience: 0, domain: 0, stage: 0 },
-              company_name: finalCompany,
-              role_title: analysis.role_title || "Unknown Role",
-              reasoning: analysis.reasoning ? [analysis.reasoning] : [],
-              why_you_match: analysis.why_you_match,
-              outreach_hook: analysis.outreach_hook,
-              red_flags: [],
-              decision: analysis.decision || "REVIEW",
-              days_since_posted: 0,
-              salary: analysis.salary || "Not disclosed",
-              urgency_score: urgency.score,
-              urgency_signals: urgency.signals,
-              status: score >= 75 ? 'approved' : 'new'
-          };
-      });
+      try {
+          const data = await generateScoringJSON(prompt);
+          const resultArray = data.results || data || [];
 
-    } catch (error) {
-      console.error("Batch Scoring Failed:", error);
-      return batch.map(s => ({ 
-          ...s, 
-          score: 0, 
-          breakdown: { role:0, location:0, experience:0, domain:0, stage:0 },
-          company_name: extractCompanyFromUrl(s.url) || "Error", 
-          role_title: "Error", 
-          reasoning: ["Scoring failed"], 
-          red_flags: [], 
-          status: 'new',
-          decision: "ERROR",
-          urgency_score: 0,
-          urgency_signals: []
-      }));
-    }
+          return chunk.map(signal => {
+              const analysis = Array.isArray(resultArray) ? resultArray.find((r: any) => r.id === signal.id) : {};
+              const urgency = extractUrgencySignals(signal.snippet, signal.title);
+              const daysOld = calculateDaysSincePosted(signal.timestamp);
+              
+              const isRoleMatch = analysis?.is_role_match !== false;
+              const finalScore = isRoleMatch ? (analysis?.match_score || 0) : 0;
+
+              return {
+                  ...signal,
+                  score: finalScore,
+                  breakdown: { role:0, location:0, experience:0, domain:0, stage:0 },
+                  company_name: analysis?.company_name || extractCompanyFromUrl(signal.url) || "Unknown",
+                  role_title: analysis?.role_title || signal.title,
+                  reasoning: [],
+                  pros: analysis?.pros || [],
+                  cons: analysis?.cons || [],
+                  red_flags: [],
+                  decision: isRoleMatch ? "REVIEW" : "REJECT_MISMATCH",
+                  salary: analysis?.salary || "Not disclosed",
+                  days_since_posted: daysOld,
+                  urgency_score: urgency.score,
+                  urgency_signals: urgency.signals,
+                  status: finalScore >= 70 ? 'approved' : 'new'
+              };
+          });
+      } catch (e) {
+          console.error("Chunk Error", e);
+          return chunk.map(s => ({ ...s, score: 0, breakdown: { role:0, location:0, experience:0, domain:0, stage:0 }, company_name: "Error", role_title: s.title, reasoning: [], pros:[], cons:[], red_flags:[], decision:"ERROR", salary:"", urgency_score:0, urgency_signals:[], status:'new' }));
+      }
   };
 
-  for (let i = 0; i < batches.length; i++) {
-      const batchRes = await processBatch(batches[i]);
-      results.push(...batchRes);
-      await new Promise(r => setTimeout(r, 200));
-  }
-  
+  const queue = [...chunks];
+  const activeWorkers = [];
+  const next = async (): Promise<void> => {
+      if (queue.length === 0) return;
+      const chunk = queue.shift();
+      if (!chunk) return;
+      const res = await processChunk(chunk);
+      results.push(...res);
+      processedChunks++;
+      if (onProgress) onProgress(`Scoring Batch ${processedChunks}/${chunks.length}...`);
+      await next();
+  };
+
+  for (let i = 0; i < 5; i++) activeWorkers.push(next());
+  await Promise.all(activeWorkers);
+
   return results.sort((a, b) => b.score - a.score);
 };
