@@ -7,7 +7,10 @@
 
 ## 🚀 New Features (v2.1)
 *   **📡 Strategy Room:** Visual confirmation of all search clusters (ATS, Regional, Web) before you launch.
-*   **🧠 AI Location Expansion:** The Brain (AI) now automatically generates an "Expansion Pack" for any location you enter. Typing "Japan" adds `("Japan" OR "JP" OR "Tokyo" OR "Osaka")` to your search. Typing "Germany" adds `("Deutschland" OR "Berlin")`.
+*   **🧠 Intelligent Location Expansion (V2):** The Brain (AI) now uses strategic hierarchical logic to expand your location search.
+    *   **Country Input:** "India" → Expands to "Bengaluru", "Mumbai", "Delhi", "Pune", "Hyderabad" (finding jobs that only list the city, not the country).
+    *   **Region Input:** "Europe" → Expands to "London", "Berlin", "Amsterdam", "Paris".
+    *   **City Input:** "SF" → Expands to "San Francisco", "Bay Area".
 *   **🌍 Deep Regional Search:** Now discovers 8-12 regional boards and **Local ATS Systems** specific to your target country (e.g., finding *Personio* in Germany or *Snaphunt* in Asia).
 *   **🔍 High-Density Mode:** Targets 8+ global ATS platforms (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, etc.) for maximum recall.
 

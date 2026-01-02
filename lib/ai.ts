@@ -83,7 +83,7 @@ export const parseCandidateProfile = async (
     return await llm.generateJSON(prompt, "sonar"); 
 };
 
-// NEW: Dynamic Location Expansion
+// NEW: Dynamic Location Expansion (Strategic V2)
 export const expandLocations = async (apiKey: string, locations: string[]): Promise<string[]> => {
     if (!locations || locations.length === 0) return [];
     
@@ -91,19 +91,30 @@ export const expandLocations = async (apiKey: string, locations: string[]): Prom
     const locStr = locations.join(', ');
 
     const prompt = `
-    TASK: Generate a "Search Expansion Pack" for these job locations: "${locStr}".
+    ROLE: Elite Technical Recruiter & Boolean Search Expert.
+    TASK: Generate a high-recall "Location Expansion Pack" for the user's input: "${locStr}".
     
-    GOAL: We need to find jobs in these regions, even if the job post uses a different term (e.g. "SF" instead of "San Francisco", or "Tokyo" instead of "Japan", or "Deutschland" instead of "Germany").
-
-    RULES:
-    1. For Countries (e.g. "Japan", "Germany"): Return the Country Name, Native Spelling (e.g. "Deutschland", "日本"), and TOP 3 Tech Hub Cities in that country (e.g. "Tokyo", "Berlin").
-    2. For Cities (e.g. "New York"): Return the full name and common abbreviations (e.g. "NYC", "Manhattan").
-    3. For Acronyms (e.g. "UAE", "UK"): Expand them.
-    4. DO NOT add generic terms like "Remote" unless explicitly asked.
+    THE PROBLEM: 
+    Job posts are inconsistent. A user searching for "India" will miss a job that only says "Bengaluru". 
+    A user searching for "SF" will miss "San Francisco".
     
-    OUTPUT: A single flat JSON array of unique strings.
-    Example Input: ["Japan", "NYC"]
-    Example Output: ["Japan", "JP", "日本", "Tokyo", "Osaka", "New York City", "NYC", "Manhattan"]
+    EXECUTION LOGIC:
+    1. **Analyze Input Granularity**:
+       - Is it a **Country**? (e.g. "Germany") -> Must include the Country Name + Native Name (Deutschland) + Top 6-8 Tech Hub Cities (Berlin, Munich, Hamburg...).
+       - Is it a **Region**? (e.g. "APAC", "Europe") -> Include Top 8-10 major tech hubs in that region.
+       - Is it a **State**? (e.g. "Texas") -> Include major cities (Austin, Dallas, Houston).
+       - Is it a **City**? (e.g. "Bengaluru") -> Include the City Name, former names (Bangalore), Airport Code (BLR), and common abbreviations.
+    
+    2. **Handling Remote**:
+       - If input contains "Remote", add "Work from home", "Distributed", "Virtual".
+       
+    3. **Output Constraint**:
+       - Return a SINGLE JSON ARRAY of unique strings.
+       - Max 15 terms total to prevent search query overflow.
+       - Prioritize the most "Tech-Dense" locations.
+    
+    Example Input: ["India"]
+    Example Output: ["India", "Bengaluru", "Bangalore", "Gurugram", "Gurgaon", "Delhi", "Mumbai", "Pune", "Hyderabad", "Noida"]
     `;
 
     try {

@@ -273,7 +273,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
            }
 
            // 2. LOCATION SYNONYM EXPANSION (The "Smart" Expansion Pack)
-           setLoadingMsg("Expanding Location Synonyms...");
+           setLoadingMsg("Generating Location Expansion Strategy...");
            try {
                const expanded = await expandLocations(apiKey, finalProfile.locations);
                finalProfile.expanded_locations = expanded;
