@@ -2,11 +2,10 @@ import { generateScoringJSON } from "./ai";
 import { RawSignal, extractCompanyFromUrl } from './discovery';
 
 export interface ScoreBreakdown {
-    role: number;
-    domain: number;
-    location: number;
-    experience: number;
-    stage: number;
+    role_fit: number;
+    location_fit: number;
+    experience_fit: number;
+    domain_fit: number;
 }
 
 export interface ScoredLead extends RawSignal {
@@ -94,15 +93,28 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
          - Use the Candidate's Seniority Level to judge matches. 
          - If Candidate is "Senior", then "Junior" is REJECT, but "Lead" or "Staff" might be okay.
          - If User wants "Product Manager" and Job is "Project Manager", is_role_match = FALSE.
-      2. RED LINE VIOLATION = IMMEDIATE REJECT.
+      
+      2. LOCATION MISMATCH = IMMEDIATE REJECT (NON-NEGOTIABLE).
+         - If User wants specific locations (e.g. "India") and Job Snippet indicates a different location (e.g. "Germany", "Berlin", "US Only"), MATCH_SCORE must be 0.
+         - Do NOT assume "Remote" implies "Worldwide" unless explicitly stated.
+         - If job is "Hybrid", it MUST match one of the User's specific locations.
+      
+      3. RED LINE VIOLATION = IMMEDIATE REJECT.
          - If snippet contains "AVOID" keyword, MATCH_SCORE < 10.
-      3. INDUSTRY MISMATCH: If user specified Industries, and job is clearly outside (e.g. Healthcare job when user wants Fintech), penalty -50 points.
+      
+      4. INDUSTRY MISMATCH: If user specified Industries, and job is clearly outside (e.g. Healthcare job when user wants Fintech), penalty -50 points.
       
       OUTPUT SCHEMA:
       {
         "id": "string",
         "is_role_match": boolean, 
-        "match_score": number, // 0-100
+        "match_score": number, // 0-100 (Sum of components)
+        "components": {
+           "role_fit": number, // Max 30 points
+           "location_fit": number, // Max 20 points
+           "experience_fit": number, // Max 20 points
+           "domain_fit": number // Max 30 points
+        },
         "company_name": "string",
         "role_title": "string",
         "salary": "string",
@@ -124,11 +136,14 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
               const isRoleMatch = analysis?.is_role_match !== false;
               // If role doesn't match, forced 0 score.
               const finalScore = isRoleMatch ? (analysis?.match_score || 0) : 0;
+              
+              // Ensure default breakdown
+              const breakdown = analysis?.components || { role_fit:0, location_fit:0, experience_fit:0, domain_fit:0 };
 
               return {
                   ...signal,
                   score: finalScore,
-                  breakdown: { role:0, location:0, experience:0, domain:0, stage:0 },
+                  breakdown: breakdown,
                   company_name: analysis?.company_name || extractCompanyFromUrl(signal.url) || "Unknown",
                   role_title: analysis?.role_title || signal.title,
                   reasoning: [],
@@ -145,7 +160,7 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
           });
       } catch (e) {
           console.error("Chunk Error", e);
-          return chunk.map(s => ({ ...s, score: 0, breakdown: { role:0, location:0, experience:0, domain:0, stage:0 }, company_name: "Error", role_title: s.title, reasoning: [], pros:[], cons:[], red_flags:[], decision:"ERROR", salary:"", urgency_score:0, urgency_signals:[], status:'new' }));
+          return chunk.map(s => ({ ...s, score: 0, breakdown: { role_fit:0, location_fit:0, experience_fit:0, domain_fit:0 }, company_name: "Error", role_title: s.title, reasoning: [], pros:[], cons:[], red_flags:[], decision:"ERROR", salary:"", urgency_score:0, urgency_signals:[], status:'new' }));
       }
   };
 

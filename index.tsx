@@ -26,6 +26,7 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
   }, []);
 
   const handleRestartClick = () => {
+    // Direct action confirmation
     if (confirm("⚠️ SYSTEM RESTART\n\nThis will reboot the system and return you to the initialization screen.\n\nYour API Keys will be pre-filled to save time.\n\nProceed?")) {
         onRestart();
     }
@@ -122,11 +123,21 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
             
             <div className="border-l border-slate-700 pl-8 space-y-6">
                <div>
-                   <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">AI Profile Analysis</h2>
+                   <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <span>🧠</span> AI Profile Analysis
+                   </h2>
                    {config.professional_bio ? (
-                       <p className="text-sm text-slate-300 italic leading-relaxed bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
-                           "{config.professional_bio}"
-                       </p>
+                       <div className="bg-slate-900/40 p-4 rounded-lg border border-slate-700/50">
+                           <p className="text-sm text-slate-300 italic leading-relaxed">
+                               "{config.professional_bio}"
+                           </p>
+                           {config.seniority_level && (
+                               <div className="mt-3 flex gap-2">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500">Inferred Seniority:</span>
+                                  <span className="text-[10px] uppercase font-bold text-indigo-400">{config.seniority_level}</span>
+                               </div>
+                           )}
+                       </div>
                    ) : (
                        <p className="text-sm text-slate-500">No narrative bio generated. Check resume.</p>
                    )}
@@ -188,16 +199,14 @@ const App = () => {
     backupKeys();
     // 2. Clear Session Data (preserves backup)
     clearKeys();
-    // 3. Reset State
-    setAppState('loading');
-    setTimeout(() => setAppState('setup'), 100);
+    // 3. Force Page Reload to ensure completely clean state (the most reliable reset)
+    window.location.reload();
   };
 
   const handleFactoryReset = () => {
     // Completely wipe everything, including backups
     if (typeof window !== 'undefined') localStorage.clear();
-    setAppState('loading');
-    setTimeout(() => setAppState('setup'), 100);
+    window.location.reload();
   };
 
   if (appState === 'loading') return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">System Initializing...</div>;

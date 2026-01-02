@@ -60,6 +60,8 @@ const getSourceAuthority = (url: string, snippet: string): number => {
     if (u.includes('greenhouse.io') || u.includes('lever.co') || u.includes('ashbyhq.com') || u.includes('workable.com') || u.includes('myworkdayjobs.com')) score = 10;
     // Rank 2: High Quality Platforms (Deep Links)
     else if (u.includes('linkedin.com') || u.includes('wellfound.com') || u.includes('ycombinator.com')) score = 5;
+    // Rank 2.5: Indian Portals (High signal for India region)
+    else if (u.includes('naukri.com') || u.includes('instahyre.com') || u.includes('cutshort.io')) score = 4;
     
     // Recency Bonus (0.1 per day fresh)
     const daysOldMatch = snippet.match(/(\d+)\s+day/);
@@ -122,9 +124,15 @@ const extractJobId = (url: string): string | null => {
 
 const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const extractTeamContext = (text: string): string => {
+    const teams = ['payments', 'infrastructure', 'infra', 'growth', 'platform', 'security', 'trust', 'data', 'ml', 'ai', 'mobile', 'web', 'backend', 'frontend', 'fullstack', 'consumer', 'enterprise', 'b2b', 'b2c'];
+    const lower = text.toLowerCase();
+    return teams.find(t => lower.includes(t)) || '';
+};
+
 /**
  * Creates a semantic fingerprint.
- * IMPROVED: Aggressively normalizes data to group duplicates.
+ * IMPROVED V2: Includes Team Context & Snippet Hash to reduce collisions.
  */
 const generateFingerprint = (item: RawSignal): string => {
     let company = extractCompanyFromUrl(item.url);
@@ -153,7 +161,7 @@ const generateFingerprint = (item: RawSignal): string => {
         return `ID:${cleanCompany}:${jobId}`;
     }
 
-    // 2. Fuzzy Matching for Aggregation
+    // 2. Fuzzy Matching V2 (The "Collision" Fix)
     // "Senior Product Manager" -> "seniorproductmanager"
     let title = normalizeString(item.title);
     
@@ -162,8 +170,14 @@ const generateFingerprint = (item: RawSignal): string => {
         title = title.replace(cleanCompany, '');
     }
 
-    // Hash the first 20 chars of title + company. 
-    return `FUZZY:${cleanCompany}:${title.slice(0, 15)}`;
+    // Extract Context (Team/Dept) to differentiate "Stripe PM (Payments)" from "Stripe PM (Growth)"
+    const team = extractTeamContext(item.title) || extractTeamContext(item.snippet);
+    
+    // Include snippet start to handle cases where titles are identical but descriptions differ
+    const snippetHash = item.snippet.slice(0, 50).replace(/[^a-zA-Z0-9]/g, '');
+
+    // Hash the combination
+    return `FUZZY_V2:${cleanCompany}:${title.slice(0, 15)}:${team}:${snippetHash}`;
 };
 
 // --- STRATEGY: URL VALIDATOR ---
@@ -236,6 +250,8 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
     return hasOverlap;
 }
 
+const INDIAN_LOCATIONS = ['india', 'bengaluru', 'bangalore', 'delhi', 'mumbai', 'gurgaon', 'noida', 'hyderabad', 'chennai', 'pune', 'kolkata'];
+
 export const buildSearchQueries = (config: any) => {
     if (!config || !config.target_roles) {
         throw new Error("Search Configuration is missing.");
@@ -260,6 +276,11 @@ export const buildSearchQueries = (config: any) => {
     const industriesQuery = config.industries && config.industries.length > 0
       ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
       : '';
+      
+    // Detect India Region to activate Special Operations Cluster
+    const hasIndiaInterest = config.locations.some((l: string) => 
+        INDIAN_LOCATIONS.some(i => l.toLowerCase().includes(i))
+    );
 
     // BROAD SEARCH STRATEGY
     // We group roles into chunks to avoid massive queries, but we DO NOT restrict with intitle:
@@ -286,8 +307,15 @@ export const buildSearchQueries = (config: any) => {
             q: `site:linkedin.com/jobs/view ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // 3. Broad Web
-        // We use some site patterns to bias towards career pages, but keep it broad.
+        // 3. Indian Portals (The "Naukri" Fix) - Only if relevant
+        if (hasIndiaInterest) {
+             queries.push({ 
+                name: `India Portals${suffix}`, 
+                q: `(site:naukri.com OR site:instahyre.com OR site:cutshort.io OR site:foundit.in OR site:hirist.com) ${roleQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            });
+        }
+        
+        // 4. Broad Web
         queries.push({ 
             name: `Web Discovery${suffix}`, 
             q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQuery} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
@@ -305,6 +333,7 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
   const depthMode = config.search_depth || 'standard';
   const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
 
+  onLog(`Configuration: Depth=${depthMode.toUpperCase()} (${pages} pages/cluster)`, 'info');
   onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
 
   const tasks: { q: any, page: number }[] = [];

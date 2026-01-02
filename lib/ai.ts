@@ -46,25 +46,28 @@ export const parseCandidateProfile = async (
 ): Promise<CandidateProfile> => {
     
     const llm = getActiveLLM();
-    const content = inputs.text ? inputs.text.slice(0, 15000) : ""; // Truncate to avoid context limits if absurdly large
+    const content = inputs.text ? inputs.text.slice(0, 15000) : ""; // Truncate to avoid context limits
 
     // OPTIMIZATION: Use 'sonar' (fast) instead of 'sonar-reasoning' (slow). 
     // Resume extraction is a standard extraction task, not deep reasoning.
     
     const prompt = `
-    TASK: Deep Analysis of Candidate Resume.
+    TASK: Comprehensive Candidate Profile Analysis.
     RESUME CONTENT: ${content}
     USER OVERRIDES: ${JSON.stringify(constraints)}
 
     INSTRUCTIONS:
-    1. ANALYZE SENIORITY: Determine strict seniority (Junior, Senior, Staff, Principal, VP, C-Level) based on years of experience and scope.
-    2. GENERATE PROFESSIONAL BIO: Write a wholesome, accurate, 3rd-person executive summary (max 150 words). NO HALLUCINATIONS. Base it strictly on the text provided. Focus on their "Superpower" and primary domain.
-    3. EXTRACT ACHIEVEMENTS: List top 3 quantitative achievements.
+    1. ANALYZE SENIORITY: STRICTLY determine seniority (Junior, Senior, Staff, Principal, VP, C-Level) based on years of experience and scope.
+    2. GENERATE "AI PROFILE ANALYSIS": Write a rich, 3rd-person executive assessment (approx 80-100 words).
+       - Structure it as: "[Name/Candidate] is a [Seniority] [Role] with deep expertise in [Domains]. Their core strength is [Superpower]. They have demonstrated impact in [Achievement Area]."
+       - STRICTLY NO HALLUCINATIONS. If a specific detail (like years of exp) is not in the text, do not invent it. Use "Not specified" if unsure.
+       - Use the candidate's actual name if found in the text.
+    3. EXTRACT ACHIEVEMENTS: List top 3 specific quantitative achievements found in the text.
     4. APPLY OVERRIDES: If user provided constraints, they overwrite your inference.
     
     OUTPUT JSON SCHEMA ONLY:
     {
-      "professional_bio": "string",
+      "professional_bio": "string", // The rich assessment
       "target_roles": ["string"],
       "seniority_level": "string",
       "locations": ["string"],
@@ -85,6 +88,8 @@ export const refineConfiguration = async (currentConfig: any, instruction: strin
     User Request: "${instruction}"
     
     ACTION: Update the Config JSON based on the User Request.
+    IMPORTANT: You must PRESERVE all other fields exactly as they are unless explicitly asked to change them. Do not drop keys like 'search_depth' or 'professional_bio'.
+    
     Return ONLY the updated JSON.
     `;
     return await llm.generateJSON(prompt, "sonar");

@@ -23,6 +23,7 @@ export const DiscoveryFeed = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filterUrgent, setFilterUrgent] = useState(false);
   const [filterSalary, setFilterSalary] = useState(false);
+  const [expandedScoreId, setExpandedScoreId] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -150,6 +151,19 @@ export const DiscoveryFeed = () => {
       return true;
   });
 
+  const renderScoreBar = (label: string, value: number, max: number, colorClass: string) => (
+      <div className="flex items-center gap-3">
+          <span className="text-[10px] font-mono text-slate-400 w-24 text-right uppercase tracking-wider">{label}</span>
+          <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full ${colorClass}`} 
+                style={{ width: `${Math.min((value / max) * 100, 100)}%` }}
+              ></div>
+          </div>
+          <span className="text-[10px] font-bold text-white w-8">{value}/{max}</span>
+      </div>
+  );
+
   const renderJobCard = (lead: ScoredLead) => {
       let domain = ""; try { domain = new URL(lead.url).hostname; } catch(e) {}
       const logoUrl = lead.company_name !== "Not specified" && lead.company_name !== "Unknown" 
@@ -180,7 +194,13 @@ export const DiscoveryFeed = () => {
                         </div>
                     </div>
                 </div>
-                <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+                
+                {/* INTERACTIVE SCORE RING */}
+                <div 
+                    className="relative w-16 h-16 flex items-center justify-center shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                    onClick={() => setExpandedScoreId(expandedScoreId === lead.id ? null : lead.id)}
+                    title="Click to view Score Breakdown"
+                >
                     <svg className="w-full h-full transform -rotate-90">
                         <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-slate-700" />
                         <circle cx="32" cy="32" r="28" stroke={scoreRingColor} strokeWidth="4" fill="transparent" strokeDasharray={175} strokeDashoffset={175 - (175 * lead.score) / 100} className="transition-all duration-1000 ease-out" />
@@ -188,6 +208,20 @@ export const DiscoveryFeed = () => {
                     <span className={`absolute text-lg font-bold ${scoreColor}`}>{lead.score}</span>
                 </div>
             </div>
+
+            {/* EXPANDABLE SCORE BREAKDOWN (GLASS BOX) */}
+            {expandedScoreId === lead.id && lead.breakdown && (
+                <div className="bg-slate-950/50 rounded-lg p-4 border border-slate-700/50 mb-4 animate-in slide-in-from-top-2 fade-in">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest border-b border-slate-800 pb-2">Scorecard Breakdown</h4>
+                    <div className="space-y-2">
+                        {renderScoreBar("Role Fit", lead.breakdown.role_fit, 30, "bg-indigo-500")}
+                        {renderScoreBar("Location", lead.breakdown.location_fit, 20, "bg-emerald-500")}
+                        {renderScoreBar("Experience", lead.breakdown.experience_fit, 20, "bg-blue-500")}
+                        {renderScoreBar("Domain", lead.breakdown.domain_fit, 30, "bg-amber-500")}
+                    </div>
+                </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                  <div className="bg-slate-900/40 rounded px-4 py-3 border border-slate-700/30 flex flex-col justify-center hover:bg-slate-900/60 transition-colors">
                     <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-0.5">Salary</span>

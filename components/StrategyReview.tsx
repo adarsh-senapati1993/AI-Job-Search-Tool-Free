@@ -31,17 +31,25 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
     if (!tweakInput.trim()) return;
     setIsTweaking(true);
     try {
-        const oldConfig = JSON.stringify(config);
-        const newConfig = await refineConfiguration(config, tweakInput);
+        const newConfigAI = await refineConfiguration(config, tweakInput);
         
+        // SAFETY MERGE: Ensure AI doesn't strip structural keys like depth/lookback/bio
+        const mergedConfig = {
+            ...config,
+            ...newConfigAI,
+            search_depth: config.search_depth, // Force preserve
+            search_lookback: config.search_lookback, // Force preserve
+            professional_bio: config.professional_bio || newConfigAI.professional_bio // Prefer existing bio if AI drops it
+        };
+
         // Simple diff detection for visual feedback
-        if (JSON.stringify(newConfig.target_roles) !== JSON.stringify(config.target_roles)) setLastUpdatedField('roles');
-        else if (JSON.stringify(newConfig.locations) !== JSON.stringify(config.locations)) setLastUpdatedField('locations');
-        else if (JSON.stringify(newConfig.avoid_keywords) !== JSON.stringify(config.avoid_keywords)) setLastUpdatedField('avoid');
+        if (JSON.stringify(mergedConfig.target_roles) !== JSON.stringify(config.target_roles)) setLastUpdatedField('roles');
+        else if (JSON.stringify(mergedConfig.locations) !== JSON.stringify(config.locations)) setLastUpdatedField('locations');
+        else if (JSON.stringify(mergedConfig.avoid_keywords) !== JSON.stringify(config.avoid_keywords)) setLastUpdatedField('avoid');
         else setLastUpdatedField('general');
 
-        onUpdateConfig(newConfig);
-        saveConfig(newConfig);
+        onUpdateConfig(mergedConfig);
+        saveConfig(mergedConfig);
         setTweakInput('');
     } catch (e) {
         console.error("Failed to refine config", e);
@@ -68,6 +76,12 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
             </div>
         </div>
       );
+  };
+
+  const getDepthLabel = (d: string) => {
+      if (d === 'comprehensive') return 'MAX (4 Pages)';
+      if (d === 'deep') return 'DEEP (2 Pages)';
+      return 'STANDARD (1 Page)';
   };
 
   return (
@@ -100,7 +114,28 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
                       {renderTagGroup('Target Roles', config.target_roles, 'bg-indigo-900/30 text-indigo-300 border-indigo-700/50', 'roles')}
                       {renderTagGroup('Locations', config.locations, 'bg-emerald-900/30 text-emerald-300 border-emerald-700/50', 'locations')}
                       {renderTagGroup('Red Lines / Avoid', config.avoid_keywords, 'bg-red-900/20 text-red-300 border-red-800/50', 'avoid')}
-                      {renderTagGroup('Priority Skills', config.skills?.slice(0, 6), 'bg-amber-900/20 text-amber-300 border-amber-800/50', 'skills')}
+                      
+                      {/* Mixed Group: Skills + Params */}
+                      <div className={`p-3 rounded-lg border bg-slate-800/30 border-slate-700`}>
+                          <div className="flex justify-between items-center mb-2">
+                              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Params & Skills</h4>
+                          </div>
+                          <div className="space-y-2">
+                              <div className="flex gap-2">
+                                  <span className="text-[10px] px-2 py-1 rounded border bg-blue-900/30 text-blue-300 border-blue-700/50">
+                                      DEPTH: {getDepthLabel(config.search_depth)}
+                                  </span>
+                                  <span className="text-[10px] px-2 py-1 rounded border bg-blue-900/30 text-blue-300 border-blue-700/50">
+                                      TIME: {config.search_lookback || '14d'}
+                                  </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                  {config.skills?.slice(0, 5).map((s: string, i: number) => (
+                                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-900/20 text-amber-300 border-amber-800/50">{s}</span>
+                                  ))}
+                              </div>
+                          </div>
+                      </div>
                   </div>
               </Card>
 
