@@ -16,41 +16,6 @@ export interface RawSignal {
 
 type LogCallback = (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
 
-// --- GEOGRAPHIC INTELLIGENCE ---
-// Maps keywords in location strings to specific local job boards
-const REGION_BOARDS: Record<string, string> = {
-    // INDIA
-    'india': 'site:naukri.com/job-listings OR site:instahyre.com/job-functions OR site:hirist.com OR site:foundit.in',
-    'bengaluru': 'site:naukri.com/job-listings OR site:instahyre.com',
-    'bangalore': 'site:naukri.com/job-listings OR site:instahyre.com',
-    'delhi': 'site:naukri.com/job-listings',
-    'mumbai': 'site:naukri.com/job-listings',
-    'gurgaon': 'site:naukri.com/job-listings',
-    'hyderabad': 'site:naukri.com/job-listings',
-
-    // MENA (Middle East)
-    'dubai': 'site:naukrigulf.com OR site:bayt.com OR site:gulftalent.com',
-    'uae': 'site:naukrigulf.com OR site:bayt.com',
-    'riyadh': 'site:naukrigulf.com OR site:bayt.com',
-    'saudi': 'site:naukrigulf.com OR site:bayt.com',
-
-    // APAC
-    'japan': 'site:wantedly.com OR site:doda.jp OR site:daijob.com',
-    'tokyo': 'site:wantedly.com OR site:doda.jp',
-    'singapore': 'site:nodeflair.com OR site:techinasia.com/jobs OR site:jobstreet.com.sg',
-    
-    // EUROPE
-    'berlin': 'site:xing.com/jobs OR site:germantechjobs.de',
-    'germany': 'site:xing.com/jobs',
-    'uk': 'site:reed.co.uk OR site:cwjobs.co.uk',
-    'london': 'site:reed.co.uk',
-
-    // REMOTE SPECIALTY
-    'remote': 'site:weworkremotely.com OR site:remoteok.com OR site:wellfound.com/jobs OR site:himalayas.app'
-};
-
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
 // Centralized Logic to extract Company Name from URL
 export const extractCompanyFromUrl = (url: string): string | null => {
     try {
@@ -81,6 +46,8 @@ export const extractCompanyFromUrl = (url: string): string | null => {
         return null;
     }
 };
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * Assigns a quality score to the source URL.
@@ -196,8 +163,6 @@ const generateFingerprint = (item: RawSignal): string => {
     }
 
     // Hash the first 20 chars of title + company. 
-    // This groups "Sr PM at Stripe" and "Senior Product Manager at Stripe" if we normalize properly,
-    // but standardizing titles is hard. We rely on the fact that most duplicates have VERY similar titles.
     return `FUZZY:${cleanCompany}:${title.slice(0, 15)}`;
 };
 
@@ -229,44 +194,45 @@ const isHighQualityJobLink = (url: string): boolean => {
 }
 
 /**
- * CLIENT-SIDE "BOUNCER"
- * Strictly enforces that the found Job Title actually matches the user's intent 
- * BEFORE we send it to the AI (saving money/latency).
+ * CLIENT-SIDE "BOUNCER" (Layer 2)
+ * PERMISSIVE MODE: Blocks only obvious nonsense. Leaves nuanced decisions to the AI Scorer.
  */
 const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]): boolean => {
     const t = title.toLowerCase();
     
     // 1. Safe Pass: Generic Titles
-    // If the title is generic, we can't judge it yet. Let the AI look at the snippet content later.
     if (t.includes('careers') || t.includes('jobs at') || t.includes('join our team') || t.includes('openings')) {
         return true;
     }
 
-    // 2. Hard Fail: Stop Words (Common unrelated roles that appear in sidebar results)
-    // If user wants "Engineer", and we found "Account Executive", kill it immediately.
+    // 2. Obvious Stop Words Check
+    // We only block these if the user is NOT explicitly looking for them.
     const stopWords = ['account executive', 'sales representative', 'customer support', 'recruiter', 'hr manager', 'legal counsel'];
-    // Only apply stop words if the user ISN'T looking for them.
     const userIsLookingForStopWord = targetRoles.some(r => stopWords.some(sw => r.toLowerCase().includes(sw)));
     
     if (!userIsLookingForStopWord) {
         if (stopWords.some(sw => t.includes(sw))) return false;
     }
 
-    // 3. Keyword Overlap Check
-    // Break target roles into tokens. e.g. "Product Manager" -> ["product", "manager"]
-    // At least one "significant" token must exist in the found title.
+    // 3. Minimum Viable Relevance (Fuzzy Token Overlap)
+    // At least ONE meaningful word from the target roles must appear.
+    // e.g. If target is "Product Manager", we need "Product" OR "Manager". 
+    // This blocks "Janitor" but allows "Product Marketing Manager".
     const significantTokens = new Set<string>();
     targetRoles.forEach(role => {
         role.toLowerCase().split(/[\s/-]/).forEach(word => {
-            if (word.length > 2 && word !== 'senior' && word !== 'lead' && word !== 'junior') {
+            if (word.length > 3 && word !== 'senior' && word !== 'lead' && word !== 'junior' && word !== 'staff') {
                 significantTokens.add(word);
             }
         });
     });
 
+    // If no significant tokens found in target (rare), just pass it.
+    if (significantTokens.size === 0) return true;
+
     const titleWords = t.split(/[\s/-]/);
     const hasOverlap = titleWords.some(word => significantTokens.has(word));
-
+    
     return hasOverlap;
 }
 
@@ -281,7 +247,7 @@ export const buildSearchQueries = (config: any) => {
     const cutoffDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - lookbackDays));
     const dateStr = cutoffDate.toISOString().split('T')[0];
 
-    // NEGATIVE FILTERING
+    // Basic Negative Filters (User defined only + minimal spam)
     const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog'];
     const userNegatives = (config.avoid_keywords || []).map((k: string) => `-"${k}"`);
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
@@ -291,42 +257,42 @@ export const buildSearchQueries = (config: any) => {
       ? `(${config.locations.map((l: string) => `"${l}"`).join(' OR ')})`
       : '';
       
-    // Crucial: Use Industry constraints in search to reduce noise
     const industriesQuery = config.industries && config.industries.length > 0
       ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
       : '';
 
-    const ROLE_CHUNK_SIZE = 5;
-    const roleChunks = [];
-    const roles = config.target_roles;
-    for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
-        roleChunks.push(roles.slice(i, i + ROLE_CHUNK_SIZE));
-    }
+    // BROAD SEARCH STRATEGY
+    // We group roles into chunks to avoid massive queries, but we DO NOT restrict with intitle:
+    // This maximizes recall.
     
     const queries: { name: string, q: string }[] = [];
+    const ROLE_CHUNK_SIZE = 4;
+    const roles = config.target_roles;
 
-    roleChunks.forEach((chunk, index) => {
-        const suffix = roleChunks.length > 1 ? ` (Batch ${index + 1})` : '';
-        const rolesQuery = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
-        
-        // ATS Direct (High Signal)
+    for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
+        const chunk = roles.slice(i, i + ROLE_CHUNK_SIZE);
+        const roleQuery = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
+        const suffix = roles.length > 4 ? ` (Batch ${Math.floor(i/ROLE_CHUNK_SIZE) + 1})` : '';
+
+        // 1. ATS Direct (High Signal)
         queries.push({ 
             name: `ATS Direct${suffix}`, 
-            q: `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:myworkdayjobs.com ${rolesQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:myworkdayjobs.com ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // Deep LinkedIn (High Volume)
+        // 2. Deep LinkedIn
         queries.push({ 
             name: `LinkedIn${suffix}`, 
-            q: `site:linkedin.com/jobs/view ${rolesQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `site:linkedin.com/jobs/view ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // Broad Web (Catch-all)
+        // 3. Broad Web
+        // We use some site patterns to bias towards career pages, but keep it broad.
         queries.push({ 
             name: `Web Discovery${suffix}`, 
-            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${rolesQuery} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
+            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQuery} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
         });
-    });
+    }
 
     return queries;
 };
@@ -382,7 +348,8 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
       // 1. Basic URL Check
       if (!isHighQualityJobLink(item.url)) return;
 
-      // 2. THE BOUNCER: Strict Title Check
+      // 2. THE BOUNCER (Layer 2)
+      // Only blocks total nonsense. Nuanced mismatches pass to Scoring.
       if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
           rejectedByGuard++;
           return;
@@ -407,7 +374,7 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
 
   const unique = Array.from(fingerprintMap.values());
   onLog(`Analysis: Found ${rawResults.length} raw signals.`, 'info');
-  onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} irrelevant titles (e.g. Accountant vs Engineer).`, 'success');
+  onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} obvious mismatches.`, 'success');
   
   return unique;
 };

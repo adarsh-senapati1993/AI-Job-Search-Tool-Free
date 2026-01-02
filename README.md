@@ -1,83 +1,68 @@
 # Job Radar + Outreach Copilot 🛰️
 
 > **The Inverse Engineering Job Search Platform.**  
-> Stop searching. Start commanding.
+> Stop doom-scrolling. Start commanding.
 
-Job Radar is an AI-powered mission control center that autonomously scans the web for high-signal job opportunities, analyzes them against your specific profile, and generates hyper-personalized outreach strategies.
+Job Radar is an advanced "Mission Control" center for your job search. Instead of manually browsing LinkedIn for hours, you give this system your Resume and Target Roles, and it autonomously:
 
-## 🌟 Features
-
--   **Deep Web Discovery**: Uses Google Search API (Serper) to find jobs across ATS systems (Greenhouse, Lever), LinkedIn, and niche boards.
--   **AI Suitability Scoring**: Analyzes every job description against your resume/profile to assign a 0-100 match score.
--   **Deduplication Engine**: Uses deterministic ID tracking to ensure you never see the same job twice.
--   **Outreach Copilot**: Generates "Hiring Manager Ready" cold emails and LinkedIn DMs based on specific job context.
--   **Strategy Room**: Fine-tune your search parameters with natural language (e.g., "Focus on Series B fintech startups").
+1.  **Scans the web** (ATS systems, LinkedIn, Niche Boards) for jobs.
+2.  **Filters out noise** (e.g. it knows "Ads Manager" is NOT "Product Manager").
+3.  **Scores every job** (0-100) based on your specific resume match.
+4.  **Writes your outreach** (Cold Emails & DMs) for you.
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Beginner's Guide: How to Run This
 
-### Prerequisites
+This app runs entirely in your browser (it is a "client-side" app). You do not need to be a coder to use it, but you need to set up two "API Keys" (passwords for the AI).
 
-You need **Node.js** (v18+) installed on your machine.
+### Step 1: Get Your API Keys
+The app needs a "Brain" (AI) and "Eyes" (Search).
 
-You also need two API keys (Paid/Free tiers available):
-1.  **Perplexity API (The Brain):** Used for reasoning and content generation. [Get Key](https://www.perplexity.ai/)
-2.  **Serper API (The Eyes):** Used for real-time Google Search results. [Get Key](https://serper.dev/) (Includes 2,500 free queries).
+1.  **The Brain (Perplexity API)**:
+    *   Go to [Perplexity.ai Settings](https://www.perplexity.ai/settings/api).
+    *   You need to add credits (starts at $5).
+    *   Generate a new API Key. It starts with `pplx-...`
+    *   *Why?* This powers the intelligence that reads resumes and writes emails.
 
-### Installation
+2.  **The Eyes (Serper API)**:
+    *   Go to [Serper.dev](https://serper.dev/).
+    *   Sign up (it's free for first 2,500 searches).
+    *   Copy your API Key.
+    *   *Why?* This allows the app to search Google for real-time job postings.
 
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/job-radar.git
-    cd job-radar
-    ```
+### Step 2: Launch the App
+1.  Open the application link.
+2.  You will see a **System Initialization** screen.
+3.  Paste your **Perplexity Key** and **Serper Key**.
+4.  Click **Connect**.
 
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
+*(Note: Your keys are saved safely in your own browser. We cannot see them.)*
 
-3.  Start the development server:
-    ```bash
-    npm run dev
-    ```
+### Step 3: Configure Your Mission
+1.  **Upload your Resume (PDF)**. The AI will instantly read it and extract your skills.
+2.  **Set Target Roles**. Be specific! (e.g. "Senior Product Manager", "Founding Engineer").
+3.  **Set Locations**. (e.g. "Remote", "London", "New York").
+4.  **Click "Save & Launch"**.
 
-4.  Open your browser to `http://localhost:5173`.
-
----
-
-## 📖 Usage Guide
-
-### 1. System Initialization
-On first launch, the **Setup Wizard** will ask for your API keys. These are stored locally in your browser (LocalStorage) and never sent to our servers.
-
-### 2. Profile Configuration
--   **Upload Resume:** Supports PDF parsing to auto-fill your skills and bio.
--   **Target Roles:** Be specific (e.g., "Senior Product Manager", "Founding Engineer").
--   **Red Lines:** Define what you want to avoid (e.g., "Crypto", "Unpaid", "Consulting").
-
-### 3. Mission Control (Discovery)
-Click **"Initialize Discovery"** to start a run.
--   **Phase 1 (Search):** The system constructs complex boolean queries to scan the web.
--   **Phase 2 (Filter):** Removing duplicates and "seen" jobs.
--   **Phase 3 (Scoring):** The AI reads every job description and scores it based on your profile.
-
-### 4. Outreach
-Click on any high-scoring lead to open the **Outreach Copilot**.
--   Enter the Hiring Manager's name (if known).
--   The AI will generate a personalized connection request and cold email draft.
+### Step 4: Review & Attack
+1.  The system will generate a strategy. Click **Confirm**.
+2.  Watch as it scans the web.
+3.  **Green Scores (80+)** are perfect matches.
+4.  Click **"Draft Outreach"** on any lead to instantly generate a cold email or LinkedIn message to the hiring manager.
 
 ---
 
 ## 🛠️ Troubleshooting
 
--   **Error: Quota Exceeded:** Check your Serper.dev dashboard. The free tier has limits.
--   **No Results Found:** Go to **Settings** and broaden your "Target Roles" or "Locations".
--   **PDF Parsing Error:** Ensure your resume is text-based, not an image scan.
+-   **"Quota Exceeded"**: This means you ran out of search credits on Serper.dev or Perplexity. Check your billing on their websites.
+-   **"No leads found"**: Try broadening your search. Remove strict "Red Lines" or add more Locations.
+-   **"Parsing Error"**: If your resume fails to upload, ensure it is a text-based PDF, not an image/scan.
 
 ---
 
-## 🔒 Privacy
-
-This application runs **client-side**. Your resume data and API keys stay in your browser's local storage. We do not maintain a database of your data.
+## 🔒 Privacy Note
+This tool is **Private by Design**. 
+-   Your resume never leaves your browser except to be processed by the AI.
+-   We do not have a database.
+-   If you clear your browser cache, your data is gone (so save your keys!).

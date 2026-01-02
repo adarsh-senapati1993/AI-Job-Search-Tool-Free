@@ -69,8 +69,11 @@ export const DiscoveryFeed = () => {
       const quota = await checkSerperQuota(serperKey || "", 50);
       if (!quota.ok) throw new Error(quota.msg || "Serper Quota Check Failed");
       
-      // 2. Search
-      const rawSignals = await searchForSignals(currentConfig, addLog, controller.signal);
+      if (controller.signal.aborted) throw new Error("Cancelled");
+
+      // 2. Search (Broad Strategy)
+      addLog("Launching Broad Discovery (High Recall Mode)...", 'info');
+      let rawSignals = await searchForSignals(currentConfig, addLog, controller.signal);
       
       if (rawSignals.length === 0) {
         setError("No leads found matching criteria.");
@@ -83,8 +86,8 @@ export const DiscoveryFeed = () => {
       const novelSignals = rawSignals.filter(s => isNovelLead(s.url));
       
       if (novelSignals.length === 0) {
-         addLog("All 100% of found jobs were already seen/processed recently.", 'warning');
-         setError("No NEW leads found (all duplicates from previous runs).");
+         addLog("All found jobs were already processed recently.", 'warning');
+         setError("No NEW leads found (all duplicates).");
          setStage('idle');
          return;
       }
@@ -96,12 +99,26 @@ export const DiscoveryFeed = () => {
       
       const scoredResults = await scoreSignals(novelSignals, currentConfig, (msg) => addLog(msg, 'info'));
 
-      addLog(`Mission Complete. ${scoredResults.length} qualified leads.`, 'success');
-      
-      // Mark as seen
+      // Mark ALL as seen to prevent re-processing in future runs, even if rejected.
       scoredResults.forEach(l => markLeadAsSeen(l.url));
+
+      // --- LAYER 4: FINAL GATEKEEPER ---
+      // Filter out absolute zeros (AI Rejections) to keep the dashboard clean.
+      const validLeads = scoredResults.filter(l => l.score > 0);
+      const rejectedCount = scoredResults.length - validLeads.length;
+
+      if (rejectedCount > 0) {
+          addLog(`Gatekeeper: Hidden ${rejectedCount} irrelevant leads (Score 0).`, 'warning');
+      }
+
+      if (validLeads.length === 0) {
+          setError("All found leads were rejected by AI as mismatches.");
+          addLog("Mission Complete, but Gatekeeper blocked all results.", 'error');
+      } else {
+          addLog(`Mission Complete. ${validLeads.length} qualified leads.`, 'success');
+      }
       
-      setLeads(scoredResults);
+      setLeads(validLeads);
       setStage('complete');
 
     } catch (err: any) {
@@ -241,7 +258,7 @@ export const DiscoveryFeed = () => {
             <div className="flex items-center gap-4">
                 <div className="flex flex-col items-end">
                     <span className="text-indigo-400 font-mono text-sm animate-pulse font-bold">{stage === 'searching' ? "SEARCHING 5 CLUSTERS..." : "BATCH SCORING..."}</span>
-                    <span className="text-[10px] text-slate-500">{stage === 'searching' ? "Aggregating 15+ Job Boards" : "Vectorized AI Analysis"}</span>
+                    <span className="text-[10px] text-slate-500">{stage === 'searching' ? "Aggregating 15+ Job Boards" : "AI Analyzing Relevancy"}</span>
                 </div>
                 <Button variant="outline" onClick={handleCancel} className="h-8 text-xs border-red-500/50 text-red-400 hover:bg-red-900">Cancel</Button>
             </div>

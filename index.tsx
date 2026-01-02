@@ -33,6 +33,16 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
 
   if (!config) return null;
 
+  const getLookbackLabel = (val: string) => {
+      if (!val) return "Last 14 Days";
+      if (val === '1d') return "Last 24 Hours";
+      if (val === '3d') return "Last 3 Days";
+      if (val === '7d') return "Last 7 Days";
+      if (val === '14d') return "Last 14 Days";
+      if (val === '30d') return "Last 30 Days";
+      return val;
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 p-8 text-white relative">
       <div className="max-w-6xl mx-auto space-y-8 pb-20">
@@ -100,10 +110,10 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
                       </div>
                     </div>
                      <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded bg-red-500/20 text-red-400 flex items-center justify-center text-xs">🚫</div>
+                      <div className="w-6 h-6 rounded bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">⏰</div>
                       <div>
-                        <div className="text-xs font-semibold text-slate-400 uppercase">Avoid (Red Lines)</div>
-                        <div className="text-white font-mono text-sm">{config.avoid_keywords?.length ? config.avoid_keywords.join(', ') : 'None'}</div>
+                        <div className="text-xs font-semibold text-slate-400 uppercase">Time Horizon</div>
+                        <div className="text-white font-mono text-sm">{getLookbackLabel(config.search_lookback)}</div>
                       </div>
                     </div>
                   </div>
@@ -174,15 +184,18 @@ const App = () => {
   }, []);
 
   const handleSoftRestart = () => {
+    // 1. Backup Keys (this is crucial for pre-filling)
     backupKeys();
+    // 2. Clear Session Data (preserves backup)
     clearKeys();
+    // 3. Reset State
     setAppState('loading');
     setTimeout(() => setAppState('setup'), 100);
   };
 
   const handleFactoryReset = () => {
-    clearKeys(); 
-    localStorage.removeItem(STORAGE_KEYS.KEY_BACKUP);
+    // Completely wipe everything, including backups
+    if (typeof window !== 'undefined') localStorage.clear();
     setAppState('loading');
     setTimeout(() => setAppState('setup'), 100);
   };

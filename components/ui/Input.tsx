@@ -8,6 +8,7 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   placeholder?: string;
   value?: string | number | readonly string[];
   onChange?: React.ChangeEventHandler<HTMLInputElement>;
+  onBlur?: React.FocusEventHandler<HTMLInputElement>;
 }
 
 export const Input = ({ label, error, className = "", ...props }: InputProps) => {

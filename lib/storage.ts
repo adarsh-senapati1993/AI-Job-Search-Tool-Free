@@ -19,9 +19,24 @@ export const clearDraft = () => { if (typeof window !== 'undefined') localStorag
 export const saveLatestRun = (leads: any[]) => { if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEYS.LATEST_RUN, JSON.stringify({ timestamp: Date.now(), leads })); };
 export const getLatestRun = (): { timestamp: number, leads: any[] } | null => { if (typeof window !== 'undefined') { const d = localStorage.getItem(STORAGE_KEYS.LATEST_RUN); return d ? JSON.parse(d) : null; } return null; };
 export const clearLatestRun = () => { if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEYS.LATEST_RUN); };
+
+// UPDATED: Only clears session data, keeps backup and seen jobs
 export const backupKeys = () => { if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEYS.KEY_BACKUP, JSON.stringify({ perplexity: getKey(STORAGE_KEYS.PERPLEXITY_KEY), serper: getKey(STORAGE_KEYS.SERPER_KEY) })); };
 export const getBackedUpKeys = () => { if (typeof window !== 'undefined') { const d = localStorage.getItem(STORAGE_KEYS.KEY_BACKUP); return d ? JSON.parse(d) : null; } return null; };
-export const clearKeys = () => { if (typeof window !== 'undefined') { localStorage.clear(); } };
+
+export const clearKeys = () => { 
+    if (typeof window !== 'undefined') { 
+        // We do NOT use localStorage.clear() anymore because it wipes the backup
+        localStorage.removeItem(STORAGE_KEYS.PERPLEXITY_KEY);
+        localStorage.removeItem(STORAGE_KEYS.SERPER_KEY);
+        localStorage.removeItem(STORAGE_KEYS.USER_CONFIG);
+        localStorage.removeItem(STORAGE_KEYS.PROFILE_DRAFT);
+        localStorage.removeItem(STORAGE_KEYS.RAW_RESUME);
+        localStorage.removeItem(STORAGE_KEYS.LATEST_RUN);
+        // We intentionally keep SEEN_JOBS and KEY_BACKUP
+    } 
+};
+
 export const hasRequiredKeys = (): boolean => !!getKey(STORAGE_KEYS.SERPER_KEY) && !!getKey(STORAGE_KEYS.PERPLEXITY_KEY);
 
 interface SeenJob { url: string; firstSeen: number; lastSeen: number; }

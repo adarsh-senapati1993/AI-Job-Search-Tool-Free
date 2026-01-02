@@ -73,6 +73,11 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
       const prompt = `
       ACT AS: Ruthless Senior Technical Recruiter.
       
+      CANDIDATE PROFILE:
+      - Bio: ${userConfig.professional_bio || "Not provided"}
+      - Seniority Level: ${userConfig.seniority_level || "Unknown"}
+      - Skills: ${userConfig.skills?.join(', ') || "Unknown"}
+
       CANDIDATE TARGET:
       - EXACT Roles Wanted: ${userConfig.target_roles.join(', ')}
       - Locations: ${userConfig.locations.join(', ')}
@@ -86,9 +91,9 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
       
       STRICT GATEKEEPING RULES:
       1. ROLE MISMATCH = IMMEDIATE REJECT.
+         - Use the Candidate's Seniority Level to judge matches. 
+         - If Candidate is "Senior", then "Junior" is REJECT, but "Lead" or "Staff" might be okay.
          - If User wants "Product Manager" and Job is "Project Manager", is_role_match = FALSE.
-         - If User wants "Software Engineer" and Job is "Solutions Architect" (Sales), is_role_match = FALSE.
-         - Only synonymous roles are allowed (e.g. "Principal PM" is ok for "Senior PM").
       2. RED LINE VIOLATION = IMMEDIATE REJECT.
          - If snippet contains "AVOID" keyword, MATCH_SCORE < 10.
       3. INDUSTRY MISMATCH: If user specified Industries, and job is clearly outside (e.g. Healthcare job when user wants Fintech), penalty -50 points.

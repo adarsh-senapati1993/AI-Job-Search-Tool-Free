@@ -52,15 +52,15 @@ export const parseCandidateProfile = async (
     // Resume extraction is a standard extraction task, not deep reasoning.
     
     const prompt = `
-    TASK: Extract Job Profile from Resume.
-    RESUME: ${content}
+    TASK: Deep Analysis of Candidate Resume.
+    RESUME CONTENT: ${content}
     USER OVERRIDES: ${JSON.stringify(constraints)}
 
     INSTRUCTIONS:
-    1. Infer Seniority (Junior/Senior/Staff/VP).
-    2. Write a 3rd-person professional bio (max 150 words).
-    3. Extract strict Arrays for JSON.
-    4. If User Overrides exist, use them.
+    1. ANALYZE SENIORITY: Determine strict seniority (Junior, Senior, Staff, Principal, VP, C-Level) based on years of experience and scope.
+    2. GENERATE PROFESSIONAL BIO: Write a wholesome, accurate, 3rd-person executive summary (max 150 words). NO HALLUCINATIONS. Base it strictly on the text provided. Focus on their "Superpower" and primary domain.
+    3. EXTRACT ACHIEVEMENTS: List top 3 quantitative achievements.
+    4. APPLY OVERRIDES: If user provided constraints, they overwrite your inference.
     
     OUTPUT JSON SCHEMA ONLY:
     {

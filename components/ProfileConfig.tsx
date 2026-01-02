@@ -116,13 +116,17 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
       setIsExtracting(true);
       setError(null);
       try {
+        let text = '';
         if (file.type === 'application/pdf') {
-            const text = await extractTextFromPDF(file);
-            setResumeText(text); 
+            text = await extractTextFromPDF(file);
         } else {
-            const text = await file.text();
-            setResumeText(text);
+            text = await file.text();
         }
+        setResumeText(text);
+        
+        // AUTO-TRIGGER: File is ready, run analysis immediately.
+        await handleAutoFill(text, linkedinUrl);
+
       } catch (err: any) {
         setError(err.message || "Failed to read file.");
         setResumeText('');
@@ -151,9 +155,16 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
       };
   };
 
-  const handleAutoFill = async () => {
-    if (!resumeText.trim() && !linkedinUrl.trim()) {
-        setError("Upload a resume or paste text first.");
+  /**
+   * Triggers the AI analysis.
+   * Can be called manually by button OR automatically by file upload/URL blur.
+   */
+  const handleAutoFill = async (overrideText?: string, overrideUrl?: string) => {
+    const textToUse = overrideText !== undefined ? overrideText : resumeText;
+    const urlToUse = overrideUrl !== undefined ? overrideUrl : linkedinUrl;
+
+    if (!textToUse.trim() && !urlToUse.trim()) {
+        if (!overrideText && !overrideUrl) setError("Please upload a resume, enter a URL, or paste text first.");
         return;
     }
 
@@ -162,13 +173,13 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
     const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
 
     // 1. OPTIMISTIC UPDATE (Instant)
-    const quickData = heuristicParse(resumeText);
+    const quickData = heuristicParse(textToUse);
     if (quickData.skills.length > 0 && !skills) setSkills(quickData.skills.join(', '));
     if (quickData.roles.length > 0 && !roles) setRoles(quickData.roles.join(', '));
     if (quickData.linkedin && !linkedinUrl) setLinkedinUrl(`https://${quickData.linkedin}`);
 
     try {
-        const inputs: ProfileInputs = { text: resumeText, linkedinUrl: linkedinUrl };
+        const inputs: ProfileInputs = { text: textToUse, linkedinUrl: urlToUse };
         const profile = await parseCandidateProfile(apiKey, inputs, {});
         
         if (profile.target_roles) setRoles(profile.target_roles.join(', '));
@@ -216,6 +227,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
       const isManualFastTrack = currentConstraints.target_roles.length > 0 && currentConstraints.locations.length > 0;
 
       if (isManualFastTrack) {
+          // Keep bio if AI generated it, otherwise generate a placeholder or simple one
           let bio = analyzedProfile?.professional_bio || "";
           if (!bio) {
              const roleStr = currentConstraints.target_roles.join(' / ');
@@ -228,6 +240,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
               ...currentConstraints, 
               professional_bio: bio,
               achievements: analyzedProfile?.achievements || [],
+              seniority_level: analyzedProfile?.seniority_level || "Unknown",
               search_lookback: lookback,
               search_depth: depth
           };
@@ -314,11 +327,17 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
                                 {isExtracting ? <span className="animate-spin text-xl">↻</span> : <span className="text-xl">📄</span>}
                            </div>
                            <p className="text-sm text-slate-300 font-medium">{selectedFile ? selectedFile.name : "Upload Resume / CV (PDF)"}</p>
-                           <p className="text-xs text-slate-500 mt-1">{isExtracting ? "Extracting..." : selectedFile ? "Ready" : "Click to select"}</p>
+                           <p className="text-xs text-slate-500 mt-1">{isExtracting ? "Extracting & Analyzing..." : selectedFile ? "Ready" : "Click to select"}</p>
                         </div>
 
                         <div className="bg-slate-950 p-3 rounded-lg border border-slate-700">
-                             <Input label="LinkedIn URL" placeholder="https://linkedin.com/in/..." value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
+                             <Input 
+                                label="LinkedIn URL" 
+                                placeholder="https://linkedin.com/in/..." 
+                                value={linkedinUrl} 
+                                onChange={(e) => setLinkedinUrl(e.target.value)} 
+                                onBlur={() => handleAutoFill(undefined, linkedinUrl)} // AUTO-TRIGGER ON BLUR
+                            />
                         </div>
 
                         <div className="space-y-2">
@@ -335,12 +354,12 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
                         </div>
 
                         <Button 
-                            onClick={handleAutoFill} 
+                            onClick={() => handleAutoFill()} 
                             disabled={isLoading || isExtracting || (!resumeText && !linkedinUrl)}
                             variant="secondary"
                             className="w-full border border-indigo-500/50 text-indigo-300 hover:bg-indigo-900/20"
                         >
-                             ✨ Auto-Fill from Resume
+                             ✨ Analyze Text Manual Entry
                         </Button>
                     </div>
                 </div>
@@ -357,13 +376,13 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
                         
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1 w-full">
-                               <label className="text-sm font-medium text-slate-300 block">Lookback</label>
+                               <label className="text-sm font-medium text-slate-300 block">Time Horizon</label>
                                <select value={lookback} onChange={(e) => setLookback(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm">
-                                  <option value="1d">24 Hours</option>
-                                  <option value="3d">3 Days</option>
-                                  <option value="7d">7 Days</option>
-                                  <option value="14d">14 Days</option>
-                                  <option value="30d">30 Days</option>
+                                  <option value="1d">Last 24 Hours</option>
+                                  <option value="3d">Last 3 Days</option>
+                                  <option value="7d">Last 7 Days</option>
+                                  <option value="14d">Last 14 Days</option>
+                                  <option value="30d">Last 30 Days</option>
                                </select>
                             </div>
                             <div className="space-y-1 w-full">
