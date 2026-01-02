@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { parseCandidateProfile, ExplicitConstraints, ProfileInputs, CandidateProfile } from '../lib/ai';
+import { parseCandidateProfile, ExplicitConstraints, ProfileInputs, CandidateProfile, identifyRegionalBoards } from '../lib/ai';
 import { getKey, saveConfig, STORAGE_KEYS, getConfig, saveDraft, getDraft, clearDraft, saveKey, clearLatestRun } from '../lib/storage';
 import * as pdfjsLibProxy from 'pdfjs-dist';
 
@@ -28,6 +28,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -169,6 +170,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
     }
 
     setIsLoading(true);
+    setLoadingMsg("Analyzing Profile...");
     setError(null);
     const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
 
@@ -195,6 +197,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
         setError("⚠️ AI Analysis failed. We've done a basic text scan instead. Please verify.");
     } finally {
         setIsLoading(false);
+        setLoadingMsg("");
     }
   };
 
@@ -218,6 +221,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
     }
 
     setIsLoading(true);
+    setLoadingMsg("Calibrating Mission...");
     setError(null);
     const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
 
@@ -258,6 +262,18 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
            finalProfile = { ...prev, ...currentConstraints, search_lookback: lookback, search_depth: depth };
       }
       
+      // --- DYNAMIC REGIONAL INTELLIGENCE ---
+      // Instead of hardcoding "India" or "London", we ask AI to find the best local boards.
+      if (finalProfile.locations && finalProfile.locations.length > 0) {
+           setLoadingMsg("Discovering Regional Job Boards...");
+           try {
+               const boards = await identifyRegionalBoards(apiKey, finalProfile.locations, finalProfile.industries || []);
+               finalProfile.regional_boards = boards;
+           } catch (e) {
+               console.warn("Failed to identify regional boards, defaulting to global.", e);
+           }
+      }
+
       saveConfig(finalProfile);
       if (resumeText.trim()) saveKey(STORAGE_KEYS.RAW_RESUME, resumeText);
 
@@ -286,6 +302,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
       setError("⚠️ AI Error. Please manually fill the 'Target Roles' and 'Locations' boxes to proceed.");
     } finally {
       setIsLoading(false);
+      setLoadingMsg("");
     }
   };
 
@@ -418,7 +435,7 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
                 disabled={isExtracting}
                 className={`w-full h-14 text-lg font-bold border-0 shadow-lg ${isFastTrackReady ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}
               >
-                {isLoading ? 'Processing...' : (isFastTrackReady ? 'Save & Launch 🚀' : 'Analyze & Save')}
+                {isLoading ? (loadingMsg || 'Processing...') : (isFastTrackReady ? 'Save & Launch 🚀' : 'Analyze & Save')}
               </Button>
             </div>
           </div>

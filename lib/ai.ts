@@ -11,6 +11,7 @@ export interface CandidateProfile {
   achievements: string[];
   search_lookback?: string; 
   search_depth?: 'standard' | 'deep' | 'comprehensive'; 
+  regional_boards?: string[]; // Dynamic addition for location-specific search
 }
 
 export interface ExplicitConstraints {
@@ -79,6 +80,46 @@ export const parseCandidateProfile = async (
     `;
 
     return await llm.generateJSON(prompt, "sonar"); 
+};
+
+export const identifyRegionalBoards = async (apiKey: string, locations: string[], industries: string[]): Promise<string[]> => {
+    const llm = getActiveLLM();
+    const locStr = locations.join(', ');
+    const indStr = industries.join(', ');
+    
+    const prompt = `
+    TASK: Identify top 8-12 high-signal regional job domains for:
+    Location: ${locStr}
+    Industry: ${indStr}
+
+    IMPORTANT:
+    - We need BOTH "Job Boards" (e.g. naukri.com, seek.com.au) AND "Popular ATS/HR Tech" used in this specific region (e.g. personio.de, breezy.hr, etc).
+    - If the location is non-US (e.g. India, Germany, HK), prioritize local ATS domains that might not be in the global list.
+
+    RULES:
+    1. Return ONLY the root domain (e.g., "naukri.com", "jobsdb.com", "personio.de").
+    2. EXCLUDE global giants: linkedin.com, indeed.com, glassdoor.com, google.com.
+    3. EXCLUDE freelancing sites (upwork, fiverr).
+    4. Focus on sites popular for full-time professional/tech roles in that specific region.
+
+    OUTPUT JSON ARRAY OF STRINGS ONLY:
+    ["domain1.com", "domain2.com"]
+    `;
+
+    try {
+        const data = await llm.generateJSON(prompt, "sonar");
+        // Robustness check: Ensure it's an array of strings and clean up format
+        if (Array.isArray(data)) {
+            return data
+                .filter(d => typeof d === 'string')
+                .map(d => d.toLowerCase().replace('www.', '').replace('https://', '').replace('http://', '').split('/')[0])
+                .filter(d => !d.includes('linkedin.com') && !d.includes('indeed') && !d.includes('glassdoor'));
+        }
+        return [];
+    } catch (e) {
+        console.warn("Regional Board Discovery Failed", e);
+        return [];
+    }
 };
 
 export const refineConfiguration = async (currentConfig: any, instruction: string): Promise<any> => {

@@ -1,14 +1,15 @@
-# 🛰️ Job Radar + Outreach Copilot (v2.0)
+# 🛰️ Job Radar + Outreach Copilot (v2.1)
 
 > **The Inverse Engineering Job Search Platform.**  
 > Stop doom-scrolling LinkedIn. Start commanding your career search.
 
 **Job Radar** is a local "Mission Control" center for your job search. Unlike standard job boards where you search for jobs, **Job Radar searches for YOU.**
 
-1.  **It Scans the Entire Web:** Accesses ATS systems (Greenhouse, Lever), LinkedIn, and **Regional Portals (Naukri, Instahyre)**.
-2.  **It Filters Out Noise:** Intelligently ignores "Junior" roles if you are "Senior", or "Sales" roles if you want "Engineering".
-3.  **It Scores Every Job (0-100):** Uses AI to read the job description against your resume and gives you a **"Glass Box" breakdown** of why you match (or don't).
-4.  **It Writes Your Outreach:** Generates hyper-personalized Cold Emails and LinkedIn DMs to hiring managers using your specific experience.
+## 🚀 New Features (v2.1)
+*   **📡 Strategy Room:** Visual confirmation of all search clusters (ATS, Regional, Web) before you launch.
+*   **🧠 Smart Location Intelligence:** Auto-fixes typos and expands abbreviations. "HongKong" becomes `("Hong Kong" OR "HongKong" OR "HK")`. "NewYork" becomes `("New York" OR "NYC")`.
+*   **🌍 Deep Regional Search:** Now discovers 8-12 regional boards and **Local ATS Systems** specific to your target country (e.g., finding *Personio* in Germany or *Snaphunt* in Asia).
+*   **🔍 High-Density Mode:** Targets 8+ global ATS platforms (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, etc.) for maximum recall.
 
 ---
 
@@ -85,10 +86,15 @@ You do not need to be a coder to use this. Follow these steps exactly.
 *   **Upload Resume:** Click the box and select your PDF. The AI will auto-read your skills.
 *   **Target Roles:** Be specific! (e.g., "Senior Product Manager", "React Developer").
 *   **Locations:**
-    *   If you are in India, type `India` or `Bengaluru`. This activates the **special Indian Job Portal search** (Naukri, Instahyre).
-    *   For remote work, type `Remote`.
+    *   Type any location (e.g., "London", "HongKong", "Berlin", "Remote").
+    *   **Smart Discovery:** The AI automatically detects the best local job boards/ATS for that region (e.g., `jobs.ch` for Switzerland, `jobsdb.com` for HK) and adds them to the search.
 
-### 3. The Dashboard (Active Radar)
+### 3. Strategy Room (NEW)
+*   Before launching, review the **"Active Search Radar"** panel.
+*   Verify that the correct Regional Boards are listed.
+*   Use the AI Co-Pilot to tweak filters (e.g., "Exclude crypto companies").
+
+### 4. The Dashboard (Active Radar)
 *   Click **"Launch Mission"**.
 *   **Wait 30-60 seconds.** The app is searching the live internet.
 *   **The Score Ring:**
@@ -97,7 +103,7 @@ You do not need to be a coder to use this. Follow these steps exactly.
     *   🔴 **Red (<50):** Likely Mismatch.
 *   **Glass Box Scoring:** Click the Score Ring to see *exactly* why the AI gave that score (e.g., "Role Fit: 30/30", "Location: 0/20").
 
-### 4. Outreach Copilot
+### 5. Outreach Copilot
 *   Found a job? Click **"✨ Draft Outreach"**.
 *   (Optional) Paste the Hiring Manager's name if you know it.
 *   Click **Generate**. The AI will write a personalized email bridging *your* specific past experience to *their* job requirements.
@@ -112,8 +118,8 @@ You do not need to be a coder to use this. Follow these steps exactly.
 **"The app says 'Quota Exceeded'"**
 *   You ran out of API credits. Check your Perplexity or Serper dashboard.
 
-**"It's not finding jobs in India"**
-*   Make sure you typed `India` or a specific Indian city in the **Locations** box during setup. This triggers the regional search engine.
+**"It's not finding local job boards"**
+*   The system discovers regional boards during the "Save" phase. Check the Mission Logs during search to see which "Regional Satellites" were activated.
 
 **"I want to reset everything"**
 *   Click the **Settings** button in the top right, then click **Factory Reset**. This deletes all keys and data so you can start fresh.

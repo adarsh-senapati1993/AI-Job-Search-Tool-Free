@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
-import { buildSearchQueries } from '../lib/discovery';
+import { buildSearchQueries, GLOBAL_ATS_TARGETS } from '../lib/discovery';
 import { refineConfiguration } from '../lib/ai';
 import { saveConfig } from '../lib/storage';
 
@@ -16,6 +16,7 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
   const [tweakInput, setTweakInput] = useState('');
   const [isTweaking, setIsTweaking] = useState(false);
   const [lastUpdatedField, setLastUpdatedField] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'radar' | 'vectors'>('radar');
   
   const queries = buildSearchQueries(config);
 
@@ -138,21 +139,83 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
                       </div>
                   </div>
               </Card>
-
-              {/* GENERATED QUERIES */}
-              <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Generated Search Vectors</h3>
-                  <div className="space-y-3">
-                      {queries.map((q, i) => (
-                          <div key={i} className="bg-slate-950/50 p-3 rounded border border-slate-800 flex flex-col gap-1">
-                              <div className="text-[10px] font-bold text-slate-500 uppercase">{q.name}</div>
-                              <code className="text-xs font-mono text-emerald-400/80 block break-all leading-relaxed">
-                                  {q.q}
-                              </code>
-                          </div>
-                      ))}
-                  </div>
+              
+              <div className="flex gap-4 border-b border-slate-700 mb-2">
+                  <button 
+                    onClick={() => setActiveTab('radar')}
+                    className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'radar' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-400 hover:text-white'}`}
+                  >
+                      📡 Active Search Radar (Visual)
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('vectors')}
+                    className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'vectors' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}
+                  >
+                      🧬 Raw Query Vectors (Debug)
+                  </button>
               </div>
+
+              {activeTab === 'radar' ? (
+                <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700 space-y-4">
+                     {/* 1. REGIONAL INTELLIGENCE (Most Important to User) */}
+                     <div className="bg-slate-900/80 p-3 rounded-lg border border-indigo-500/30">
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">🌍</span>
+                            <div>
+                                <h4 className="text-sm font-bold text-white">Regional Intelligence (Location Specific)</h4>
+                                <p className="text-[10px] text-slate-400">AI-discovered high-signal boards for your region.</p>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {config.regional_boards && config.regional_boards.length > 0 ? (
+                                config.regional_boards.map((board: string, i: number) => (
+                                    <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                                        {board}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-xs text-slate-500 italic">No specific regional boards needed (Using Global + Broad Web).</span>
+                            )}
+                        </div>
+                     </div>
+
+                     {/* 2. GLOBAL ATS */}
+                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Global ATS Network (Direct Access)</h4>
+                         <div className="flex flex-wrap gap-2">
+                             {GLOBAL_ATS_TARGETS.map((ats, i) => (
+                                 <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/20 text-emerald-400 border border-emerald-900/30">
+                                     {ats.replace('boards.', '').replace('jobs.', '').replace('apply.', '').replace('careers.', '')}
+                                 </span>
+                             ))}
+                         </div>
+                     </div>
+
+                     {/* 3. BROAD WEB */}
+                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
+                         <div>
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Broad Web Sweep</h4>
+                            <p className="text-[10px] text-slate-500">Recursive pattern matching for unlisted careers pages</p>
+                         </div>
+                         <div className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-1 rounded">
+                             site:careers.* OR site:jobs.*
+                         </div>
+                     </div>
+                </div>
+              ) : (
+                <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700">
+                    <div className="space-y-3">
+                        {queries.map((q, i) => (
+                            <div key={i} className="bg-slate-950/50 p-3 rounded border border-slate-800 flex flex-col gap-1">
+                                <div className="text-[10px] font-bold text-slate-500 uppercase">{q.name}</div>
+                                <code className="text-xs font-mono text-emerald-400/80 block break-all leading-relaxed">
+                                    {q.q}
+                                </code>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+              )}
           </div>
 
           {/* RIGHT: The Co-Pilot */}

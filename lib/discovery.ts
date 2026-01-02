@@ -16,6 +16,22 @@ export interface RawSignal {
 
 type LogCallback = (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
 
+// --- CONSTANTS FOR VISIBILITY & DENSITY ---
+export const GLOBAL_ATS_TARGETS = [
+    'boards.greenhouse.io',
+    'jobs.lever.co',
+    'jobs.ashbyhq.com',
+    'myworkdayjobs.com',
+    'jobs.smartrecruiters.com',
+    'apply.workable.com',
+    'breezy.hr',
+    'careers.jobscore.com'
+];
+
+export const GLOBAL_NETWORKS = [
+    'linkedin.com/jobs/view'
+];
+
 // Centralized Logic to extract Company Name from URL
 export const extractCompanyFromUrl = (url: string): string | null => {
     try {
@@ -24,7 +40,7 @@ export const extractCompanyFromUrl = (url: string): string | null => {
         const path = u.pathname;
 
         // 1. ATS Systems (High Confidence)
-        if (host.includes('greenhouse.io') || host.includes('lever.co') || host.includes('ashbyhq.com') || host.includes('workable.com')) {
+        if (host.includes('greenhouse.io') || host.includes('lever.co') || host.includes('ashbyhq.com') || host.includes('workable.com') || host.includes('smartrecruiters.com')) {
             const parts = path.split('/').filter(p => p);
             if (parts.length > 0) return capitalize(parts[0]);
         }
@@ -53,15 +69,15 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * Assigns a quality score to the source URL.
  * Higher is better. Used to resolve duplicates.
  */
-const getSourceAuthority = (url: string, snippet: string): number => {
+const getSourceAuthority = (url: string, snippet: string, regionalBoards: string[] = []): number => {
     const u = url.toLowerCase();
     let score = 1;
     // Rank 3: Direct ATS (Source of Truth - Highest Priority)
-    if (u.includes('greenhouse.io') || u.includes('lever.co') || u.includes('ashbyhq.com') || u.includes('workable.com') || u.includes('myworkdayjobs.com')) score = 10;
+    if (GLOBAL_ATS_TARGETS.some(ats => u.includes(ats.replace('boards.', '').replace('jobs.', '')))) score = 10;
     // Rank 2: High Quality Platforms (Deep Links)
     else if (u.includes('linkedin.com') || u.includes('wellfound.com') || u.includes('ycombinator.com')) score = 5;
-    // Rank 2.5: Indian Portals (High signal for India region)
-    else if (u.includes('naukri.com') || u.includes('instahyre.com') || u.includes('cutshort.io')) score = 4;
+    // Rank 2.5: Dynamic Regional Portals (Identified by AI)
+    else if (regionalBoards.some(board => u.includes(board))) score = 4;
     
     // Recency Bonus (0.1 per day fresh)
     const daysOldMatch = snippet.match(/(\d+)\s+day/);
@@ -250,7 +266,35 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
     return hasOverlap;
 }
 
-const INDIAN_LOCATIONS = ['india', 'bengaluru', 'bangalore', 'delhi', 'mumbai', 'gurgaon', 'noida', 'hyderabad', 'chennai', 'pune', 'kolkata'];
+/**
+ * INTELLIGENT LOCATION NORMALIZATION (The Fix for "HongKong" vs "Hong Kong")
+ * Creates a "synonym net" for locations to catch variations, typos, and abbreviations.
+ */
+const normalizeLocationInput = (input: string): string => {
+    const raw = input.trim();
+    if (!raw) return "";
+
+    // 1. Split CamelCase (e.g. "HongKong" -> "Hong Kong")
+    const spaced = raw.replace(/([a-z])([A-Z])/g, '$1 $2');
+    
+    const set = new Set([raw, spaced]);
+    const lower = spaced.toLowerCase();
+
+    // 2. Common Global Abbreviations Dictionary
+    if (lower.includes('hong kong')) set.add('HK');
+    if (lower.includes('united states') || lower === 'us') set.add('USA');
+    if (lower.includes('united kingdom') || lower === 'uk') set.add('UK');
+    if (lower.includes('san francisco')) set.add('SF');
+    if (lower.includes('new york')) set.add('NYC');
+    if (lower.includes('kuala lumpur')) set.add('KL');
+    if (lower.includes('bengaluru')) set.add('Bangalore');
+    if (lower.includes('ho chi minh')) set.add('HCMC');
+    if (lower.includes('united arab emirates')) set.add('UAE');
+
+    // 3. Construct Boolean OR Query
+    const terms = Array.from(set).filter(s => s.length > 0).map(s => `"${s}"`);
+    return `(${terms.join(' OR ')})`;
+}
 
 export const buildSearchQueries = (config: any) => {
     if (!config || !config.target_roles) {
@@ -263,32 +307,25 @@ export const buildSearchQueries = (config: any) => {
     const cutoffDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - lookbackDays));
     const dateStr = cutoffDate.toISOString().split('T')[0];
 
-    // Basic Negative Filters (User defined only + minimal spam)
+    // Basic Negative Filters
     const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog'];
     const userNegatives = (config.avoid_keywords || []).map((k: string) => `-"${k}"`);
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
     
-    // INDUSTRY & LOCATION INJECTION
+    // SMART LOCATION INJECTION (Using Normalizer)
     const locationsQuery = config.locations.length > 0 
-      ? `(${config.locations.map((l: string) => `"${l}"`).join(' OR ')})`
+      ? `(${config.locations.map(normalizeLocationInput).join(' OR ')})`
       : '';
       
     const industriesQuery = config.industries && config.industries.length > 0
       ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
       : '';
       
-    // Detect India Region to activate Special Operations Cluster
-    const hasIndiaInterest = config.locations.some((l: string) => 
-        INDIAN_LOCATIONS.some(i => l.toLowerCase().includes(i))
-    );
-
-    // BROAD SEARCH STRATEGY
-    // We group roles into chunks to avoid massive queries, but we DO NOT restrict with intitle:
-    // This maximizes recall.
-    
     const queries: { name: string, q: string }[] = [];
     const ROLE_CHUNK_SIZE = 4;
     const roles = config.target_roles;
+
+    const atsQueryPart = GLOBAL_ATS_TARGETS.map(t => `site:${t}`).join(' OR ');
 
     for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
         const chunk = roles.slice(i, i + ROLE_CHUNK_SIZE);
@@ -298,7 +335,7 @@ export const buildSearchQueries = (config: any) => {
         // 1. ATS Direct (High Signal)
         queries.push({ 
             name: `ATS Direct${suffix}`, 
-            q: `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:myworkdayjobs.com ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `${atsQueryPart} ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
         // 2. Deep LinkedIn
@@ -307,11 +344,12 @@ export const buildSearchQueries = (config: any) => {
             q: `site:linkedin.com/jobs/view ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // 3. Indian Portals (The "Naukri" Fix) - Only if relevant
-        if (hasIndiaInterest) {
-             queries.push({ 
-                name: `India Portals${suffix}`, 
-                q: `(site:naukri.com OR site:instahyre.com OR site:cutshort.io OR site:foundit.in OR site:hirist.com) ${roleQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+        // 3. Dynamic Regional Portals
+        if (config.regional_boards && config.regional_boards.length > 0) {
+            const siteOperators = config.regional_boards.map((domain: string) => `site:${domain}`).join(' OR ');
+            queries.push({ 
+                name: `Regional Portals${suffix}`, 
+                q: `(${siteOperators}) ${roleQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
             });
         }
         
@@ -334,6 +372,10 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
   const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
 
   onLog(`Configuration: Depth=${depthMode.toUpperCase()} (${pages} pages/cluster)`, 'info');
+  if (config.regional_boards?.length > 0) {
+      onLog(`Regional Satellites Active: ${config.regional_boards.join(', ')}`, 'success');
+  }
+  
   onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
 
   const tasks: { q: any, page: number }[] = [];
@@ -378,7 +420,6 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
       if (!isHighQualityJobLink(item.url)) return;
 
       // 2. THE BOUNCER (Layer 2)
-      // Only blocks total nonsense. Nuanced mismatches pass to Scoring.
       if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
           rejectedByGuard++;
           return;
@@ -387,11 +428,10 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
       const fingerprint = generateFingerprint(item);
       const existing = fingerprintMap.get(fingerprint);
       
-      const scoreNew = getSourceAuthority(item.url, item.snippet);
+      const scoreNew = getSourceAuthority(item.url, item.snippet, config.regional_boards);
       
       if (existing) {
-          const scoreOld = getSourceAuthority(existing.url, existing.snippet);
-          
+          const scoreOld = getSourceAuthority(existing.url, existing.snippet, config.regional_boards);
           if (scoreNew > scoreOld) {
               fingerprintMap.set(fingerprint, item);
           }
