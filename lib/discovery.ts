@@ -107,8 +107,70 @@ const getSourceAuthority = (url: string, snippet: string): number => {
 };
 
 /**
- * Creates a semantic fingerprint: "company:normalized_title:team"
- * e.g. "lenskart:seniorproductmanager:payments"
+ * Helper: Extracts a Deterministic Job ID from the URL if possible.
+ */
+const extractJobId = (url: string): string | null => {
+    try {
+        const u = new URL(url);
+        const path = u.pathname;
+        const search = new URLSearchParams(u.search);
+
+        // Greenhouse: /company/jobs/12345 or ?gh_jid=12345
+        if (u.hostname.includes('greenhouse.io')) {
+            if (search.get('gh_jid')) return search.get('gh_jid');
+            const parts = path.split('/').filter(p => p);
+            const last = parts[parts.length - 1];
+            if (last && /^\d+$/.test(last)) return last;
+        }
+
+        // Lever: /company/id
+        if (u.hostname.includes('lever.co')) {
+             const parts = path.split('/').filter(p => p);
+             return parts.length >= 2 ? parts[parts.length - 1] : null;
+        }
+
+        // Ashby: /company/id
+        if (u.hostname.includes('ashbyhq.com')) {
+             const parts = path.split('/').filter(p => p);
+             return parts[parts.length - 1];
+        }
+        
+        // Workable: /j/CODE
+        if (u.hostname.includes('workable.com')) {
+             const parts = path.split('/');
+             const jIndex = parts.indexOf('j');
+             if (jIndex !== -1 && parts[jIndex + 1]) return parts[jIndex + 1];
+        }
+
+        // LinkedIn: /jobs/view/ID or ?currentJobId=ID
+        if (u.hostname.includes('linkedin.com')) {
+            if (path.includes('/jobs/view/')) {
+                const parts = path.split('/jobs/view/');
+                if (parts[1]) {
+                    const id = parts[1].split('/')[0].replace(/\D/g, '');
+                    if (id) return id;
+                }
+            }
+            if (search.get('currentJobId')) return search.get('currentJobId');
+        }
+
+        // Workday: often Title_ID
+        if (u.hostname.includes('myworkdayjobs.com')) {
+            const parts = path.split('/');
+            const last = parts[parts.length - 1];
+            const idMatch = last.match(/([A-Z0-9]+)$/i);
+            if (idMatch) return idMatch[1];
+        }
+
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Creates a semantic fingerprint.
+ * IMPROVED V2: Prioritizes Deterministic Job IDs over fuzzy content hashing.
  */
 const generateFingerprint = (item: RawSignal): string => {
     let company = extractCompanyFromUrl(item.url);
@@ -121,17 +183,31 @@ const generateFingerprint = (item: RawSignal): string => {
         }
     }
     
+    // 1. Deterministic ID Check (The Gold Standard)
+    const jobId = extractJobId(item.url);
+    if (jobId) {
+        // We still prepend company to ensure ID collisions between systems don't happen
+        return `ID:${company?.toLowerCase()}:${jobId}`;
+    }
+
+    // 2. Fallback: Enhanced Fuzzy Hash
     // Normalize Title
     let title = item.title.toLowerCase().replace(/[^a-z0-9]/g, '');
     
-    // Extract Team/Context (e.g. "Payments", "Platform") to differentiate roles
-    const teamMatch = item.title.match(/\b(Payments|Platform|Infrastructure|Growth|Data|Backend|Frontend|Mobile)\b/i);
+    // Extract Team/Context to differentiate roles
+    const teamMatch = item.title.match(/\b(Payments|Platform|Infrastructure|Growth|Data|Backend|Frontend|Mobile|Trust|Safety|GenAI|ML)\b/i);
     const team = teamMatch ? teamMatch[0].toLowerCase() : 'gen';
 
-    // Snippet Hash (First 40 chars)
-    const snippetHash = item.snippet.slice(0, 40).replace(/\s/g, '').toLowerCase();
+    // Full Snippet Hash (Not just first 40 chars)
+    // Remove company name from snippet to reduce boilerplate noise
+    const cleanSnippet = item.snippet.toLowerCase()
+        .replace(new RegExp(company?.toLowerCase() || 'xyz', 'g'), '')
+        .replace(/[^a-z0-9]/g, '');
     
-    return `${company?.toLowerCase()}:${title}:${team}:${snippetHash}`;
+    // Take first 100 chars of *unique* content (better than 40 chars of boilerplate)
+    const snippetHash = cleanSnippet.slice(0, 100); 
+    
+    return `HASH:${company?.toLowerCase()}:${title}:${team}:${snippetHash}`;
 };
 
 // --- STRATEGY: URL VALIDATOR ---
