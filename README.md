@@ -1,16 +1,17 @@
-# 🛰️ Job Radar + Outreach Copilot (v2.1)
+# 🛰️ Job Radar + Outreach Copilot (v2.2)
 
 > **The Inverse Engineering Job Search Platform.**  
 > Stop doom-scrolling LinkedIn. Start commanding your career search.
 
 **Job Radar** is a local "Mission Control" center for your job search. Unlike standard job boards where you search for jobs, **Job Radar searches for YOU.**
 
-## 🚀 New Features (v2.1)
+## 🚀 New Features (v2.2)
 *   **📡 Strategy Room:** Visual confirmation of all search clusters (ATS, Regional, Web) before you launch.
-*   **🧠 Intelligent Location Hierarchy (V4):** The Brain (AI) now understands geographical scope.
-    *   **City Level (Strict):** "Pune" → "Pune", "Poona". (Does NOT add neighbors like Mumbai).
-    *   **State Level (Regional):** "Maharashtra" → "Mumbai", "Pune", "Nagpur", "Nashik" (Expands to hubs within the state).
-    *   **Country Level (National):** "India" → "Bengaluru", "Delhi", "Mumbai", "Hyderabad" (Expands to all major national hubs).
+*   **🧠 Intelligent Location Hierarchy (V4.2 - Type-First Strictness):** The Brain (AI) now performs a strict classification step before expansion to prevent "context bleeding".
+    *   **City Level (Strict):** "Bengaluru" → "Bengaluru", "Bangalore", "BLR". (Explicitly **BLOCKS** neighbors like Hyderabad or Chennai).
+    *   **State Level (Regional):** "Karnataka" → "Bengaluru", "Mysuru", "Mangaluru" (Expands only within political borders).
+    *   **Country Level (National):** "India" → "Bengaluru", "Delhi", "Mumbai", "Hyderabad" (Expands to major national hubs).
+    *   **Multi-Country Density Check:** If you enter multiple countries (e.g., "Japan, Taiwan"), the AI automatically limits expansion to the **Top 3-4 Hubs** per country to prevent search query explosion.
 *   **🌍 Deep Regional Search:** Now discovers 8-12 regional boards and **Local ATS Systems** specific to your target country (e.g., finding *Personio* in Germany or *Snaphunt* in Asia).
 *   **🔍 High-Density Mode:** Targets 8+ global ATS platforms (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, etc.) for maximum recall.
 
@@ -124,8 +125,11 @@ You do not need to be a coder to use this. Follow these steps exactly.
 **"It's not finding local job boards"**
 *   The system discovers regional boards during the "Save" phase. Check the Mission Logs during search to see which "Regional Satellites" were activated.
 
-**"I want to reset everything"**
-*   Click the **Settings** button in the top right, then click **Factory Reset**. This deletes all keys and data so you can start fresh.
+**"I want to change my API keys or fix a connection error"**
+*   Click **Reset Session** in the top navigation bar. This will disconnect your current session and take you back to the Setup Wizard without deleting your saved profile data.
+
+**"I want to delete everything and start fresh"**
+*   Click the **Settings** button in the top right, then click **Factory Reset**. This completely wipes all keys, profile data, and caches.
 
 ---
 

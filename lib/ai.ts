@@ -83,7 +83,7 @@ export const parseCandidateProfile = async (
     return await llm.generateJSON(prompt, "sonar"); 
 };
 
-// NEW: Dynamic Location Expansion (Strategic V4.1 - Multi-Country Density Check)
+// NEW: Dynamic Location Expansion (Strategic V4.2 - Type-First Strictness)
 export const expandLocations = async (apiKey: string, locations: string[]): Promise<string[]> => {
     if (!locations || locations.length === 0) return [];
     
@@ -92,31 +92,37 @@ export const expandLocations = async (apiKey: string, locations: string[]): Prom
     const prompt = `
     ROLE: Elite Technical Recruiter & Boolean Search Architect.
     TASK: Create a precise "Boolean Search Expansion List" for these locations: ${JSON.stringify(locations)}.
-    
-    HIERARCHICAL EXPANSION LOGIC (Apply logic per item):
-    
-    1. **CITY LEVEL (Strict Precision)**
-       - Input: "Pune", "San Francisco", "Munich", "Bengaluru".
-       - Action: Return ONLY the City Name, Former Names (e.g. "Poona", "Bangalore"), and standard abbreviations (e.g. "SF", "NYC", "BLR").
-       - CONSTRAINT: NEVER add other cities. "Pune" != "Mumbai". "Munich" != "Berlin".
-       
-    2. **STATE / PROVINCE LEVEL (Regional Expansion)**
-       - Input: "Maharashtra", "California", "Karnataka", "Bavaria".
-       - Action: Return the State Name AND the Top 3-5 Tech Hub Cities *within that state*.
-       - Example: "Maharashtra" -> ["Maharashtra", "Mumbai", "Pune", "Nagpur", "Nashik"].
-       - Example: "California" -> ["California", "San Francisco", "Los Angeles", "San Diego", "Bay Area"].
 
-    3. **COUNTRY LEVEL (National Expansion)**
-       - Input: "India", "Germany", "Japan", "Taiwan".
-       - Action: Return Country Name AND the Major Tech Hubs.
-       - DENSITY CHECK: If the input list contains MULTIPLE countries (e.g. "Japan, Taiwan"), limit expansion to the **TOP 3-4** hubs per country to prevent query overflow.
-       - Example (Japan): "Japan", "Tokyo", "Osaka", "Fukuoka".
-       - Example (Taiwan): "Taiwan", "Taipei", "Hsinchu".
+    INSTRUCTIONS:
+    For EACH location in the input list, perform a STRICT classification step before expanding.
 
-    4. **REMOTE**
-       - Action: Add "Remote", "Work from home", "Distributed", "Virtual".
+    STEP 1: CLASSIFY
+    - Is it a CITY? (e.g., Bengaluru, London, NYC, Pune)
+    - Is it a STATE/PROVINCE? (e.g., California, Karnataka, Bavaria)
+    - Is it a COUNTRY? (e.g., India, Germany, USA)
+    - Is it a REMOTE_TERM? (e.g., Remote, Virtual)
 
-    OUTPUT: A single flat JSON array of unique strings combining all logic. Max 25 terms total.
+    STEP 2: APPLY STRICT EXPANSION RULES (Based on Class)
+
+    🔴 IF CITY:
+    - RETURN: The Input City Name + Valid Synonyms/Former Names + Airport Code (if major).
+    - FORBIDDEN: Do NOT add neighboring cities. Do NOT add the State. Do NOT add the Country.
+    - Example: "Bengaluru" -> ["Bengaluru", "Bangalore", "BLR"] (Correct).
+    - Example: "Bengaluru" -> ["Bengaluru", "Hyderabad", "Chennai"] (WRONG - These are neighbors).
+    - Example: "Pune" -> ["Pune", "Poona"] (Correct).
+
+    🟡 IF STATE/PROVINCE:
+    - RETURN: The State Name + Top 3 Tech Hub Cities within that state.
+    - Example: "Karnataka" -> ["Karnataka", "Bengaluru", "Mysuru", "Mangaluru"].
+
+    🟢 IF COUNTRY:
+    - RETURN: The Country Name + Top 4 Major Tech Hubs in that country.
+    - DENSITY CHECK: If input has multiple countries, limit to Top 3 hubs per country.
+
+    🔵 IF REMOTE_TERM:
+    - RETURN: ["Remote", "Work from home", "Distributed", "Virtual"].
+
+    OUTPUT: A single flat JSON array of unique strings. Max 25 terms total.
     `;
 
     try {

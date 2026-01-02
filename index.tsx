@@ -27,7 +27,7 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
 
   const handleRestartClick = () => {
     // Direct action confirmation
-    if (confirm("⚠️ SYSTEM RESTART\n\nThis will reboot the system and return you to the initialization screen.\n\nYour API Keys will be pre-filled to save time.\n\nProceed?")) {
+    if (confirm("⚠️ SYSTEM RESET\n\nThis will disconnect your session and return you to the API Key Initialization screen.\n\nYour keys will be saved in backup for easy re-entry.\n\nProceed?")) {
         onRestart();
     }
   };
@@ -68,7 +68,7 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
               onClick={handleRestartClick}
               className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium border border-slate-700 transition-colors text-amber-400 hover:text-amber-300 border-amber-900/30"
             >
-              Restart
+              Reset Session
             </button>
           </div>
         </div>
@@ -195,10 +195,12 @@ const App = () => {
   }, []);
 
   const handleSoftRestart = () => {
-    // 1. Backup Keys (this is crucial for pre-filling)
+    // 1. Backup Keys (Preserve keys so user doesn't have to hunt for them again)
     backupKeys();
-    // 2. Clear Session Data (preserves backup)
+    
+    // 2. Clear Session Keys (Forces SetupWizard to appear)
     clearKeys();
+    
     // 3. Force Page Reload to ensure completely clean state (the most reliable reset)
     window.location.reload();
   };
