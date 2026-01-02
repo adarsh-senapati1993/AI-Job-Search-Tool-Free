@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import './index.css';
 import { SetupWizard } from './components/SetupWizard';
 import { ProfileConfig } from './components/ProfileConfig';
 import { Settings } from './components/Settings';
@@ -7,6 +8,8 @@ import { DiscoveryFeed } from './components/DiscoveryFeed';
 import { hasRequiredKeys, getConfig, getKey, STORAGE_KEYS, clearKeys, backupKeys } from './lib/storage';
 import { Card } from './components/ui/Card';
 import { Button } from './components/ui/Button';
+import { ChatBot } from './components/ChatBot';
+import { ToastContainer } from './components/ui/Toast';
 
 interface DashboardProps {
   onEditConfig: () => void;
@@ -144,6 +147,7 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
             onReset={onFactoryReset} 
           />
       )}
+      <ChatBot />
     </div>
   );
 };
@@ -187,6 +191,7 @@ const App = () => {
 
   return (
     <>
+      <ToastContainer />
       {appState === 'setup' ? (
         <SetupWizard onComplete={() => setAppState('config')} />
       ) : appState === 'config' ? (
