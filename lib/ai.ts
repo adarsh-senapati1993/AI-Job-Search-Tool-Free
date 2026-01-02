@@ -5,13 +5,14 @@ export interface CandidateProfile {
   target_roles: string[];
   seniority_level: string;
   locations: string[];
+  expanded_locations?: string[]; // NEW: AI-generated synonyms
   skills: string[];
   industries: string[];
   avoid_keywords: string[];
   achievements: string[];
   search_lookback?: string; 
   search_depth?: 'standard' | 'deep' | 'comprehensive'; 
-  regional_boards?: string[]; // Dynamic addition for location-specific search
+  regional_boards?: string[]; 
 }
 
 export interface ExplicitConstraints {
@@ -82,6 +83,42 @@ export const parseCandidateProfile = async (
     return await llm.generateJSON(prompt, "sonar"); 
 };
 
+// NEW: Dynamic Location Expansion
+export const expandLocations = async (apiKey: string, locations: string[]): Promise<string[]> => {
+    if (!locations || locations.length === 0) return [];
+    
+    const llm = getActiveLLM();
+    const locStr = locations.join(', ');
+
+    const prompt = `
+    TASK: Generate a "Search Expansion Pack" for these job locations: "${locStr}".
+    
+    GOAL: We need to find jobs in these regions, even if the job post uses a different term (e.g. "SF" instead of "San Francisco", or "Tokyo" instead of "Japan", or "Deutschland" instead of "Germany").
+
+    RULES:
+    1. For Countries (e.g. "Japan", "Germany"): Return the Country Name, Native Spelling (e.g. "Deutschland", "日本"), and TOP 3 Tech Hub Cities in that country (e.g. "Tokyo", "Berlin").
+    2. For Cities (e.g. "New York"): Return the full name and common abbreviations (e.g. "NYC", "Manhattan").
+    3. For Acronyms (e.g. "UAE", "UK"): Expand them.
+    4. DO NOT add generic terms like "Remote" unless explicitly asked.
+    
+    OUTPUT: A single flat JSON array of unique strings.
+    Example Input: ["Japan", "NYC"]
+    Example Output: ["Japan", "JP", "日本", "Tokyo", "Osaka", "New York City", "NYC", "Manhattan"]
+    `;
+
+    try {
+        const data = await llm.generateJSON(prompt, "sonar");
+        if (Array.isArray(data)) {
+            // Deduplicate and clean
+            return [...new Set(data.filter(d => typeof d === 'string' && d.length > 0))];
+        }
+        return locations;
+    } catch (e) {
+        console.warn("Location Expansion Failed", e);
+        return locations; // Fallback to originals
+    }
+};
+
 export const identifyRegionalBoards = async (apiKey: string, locations: string[], industries: string[]): Promise<string[]> => {
     const llm = getActiveLLM();
     const locStr = locations.join(', ');
@@ -108,7 +145,6 @@ export const identifyRegionalBoards = async (apiKey: string, locations: string[]
 
     try {
         const data = await llm.generateJSON(prompt, "sonar");
-        // Robustness check: Ensure it's an array of strings and clean up format
         if (Array.isArray(data)) {
             return data
                 .filter(d => typeof d === 'string')
@@ -129,7 +165,7 @@ export const refineConfiguration = async (currentConfig: any, instruction: strin
     User Request: "${instruction}"
     
     ACTION: Update the Config JSON based on the User Request.
-    IMPORTANT: You must PRESERVE all other fields exactly as they are unless explicitly asked to change them. Do not drop keys like 'search_depth' or 'professional_bio'.
+    IMPORTANT: You must PRESERVE all other fields exactly as they are unless explicitly asked to change them. Do not drop keys like 'search_depth' or 'professional_bio' or 'expanded_locations'.
     
     Return ONLY the updated JSON.
     `;

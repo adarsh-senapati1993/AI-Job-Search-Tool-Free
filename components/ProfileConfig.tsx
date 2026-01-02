@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { parseCandidateProfile, ExplicitConstraints, ProfileInputs, CandidateProfile, identifyRegionalBoards } from '../lib/ai';
+import { parseCandidateProfile, ExplicitConstraints, ProfileInputs, CandidateProfile, identifyRegionalBoards, expandLocations } from '../lib/ai';
 import { getKey, saveConfig, STORAGE_KEYS, getConfig, saveDraft, getDraft, clearDraft, saveKey, clearLatestRun } from '../lib/storage';
 import * as pdfjsLibProxy from 'pdfjs-dist';
 
@@ -262,15 +262,23 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
            finalProfile = { ...prev, ...currentConstraints, search_lookback: lookback, search_depth: depth };
       }
       
-      // --- DYNAMIC REGIONAL INTELLIGENCE ---
-      // Instead of hardcoding "India" or "London", we ask AI to find the best local boards.
       if (finalProfile.locations && finalProfile.locations.length > 0) {
+           // 1. REGIONAL INTELLIGENCE
            setLoadingMsg("Discovering Regional Job Boards...");
            try {
                const boards = await identifyRegionalBoards(apiKey, finalProfile.locations, finalProfile.industries || []);
                finalProfile.regional_boards = boards;
            } catch (e) {
                console.warn("Failed to identify regional boards, defaulting to global.", e);
+           }
+
+           // 2. LOCATION SYNONYM EXPANSION (The "Smart" Expansion Pack)
+           setLoadingMsg("Expanding Location Synonyms...");
+           try {
+               const expanded = await expandLocations(apiKey, finalProfile.locations);
+               finalProfile.expanded_locations = expanded;
+           } catch (e) {
+               console.warn("Failed to expand locations.", e);
            }
       }
 

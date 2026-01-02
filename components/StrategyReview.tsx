@@ -113,7 +113,8 @@ export const StrategyReview = ({ config, onConfirm, onUpdateConfig, onCancel }: 
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {renderTagGroup('Target Roles', config.target_roles, 'bg-indigo-900/30 text-indigo-300 border-indigo-700/50', 'roles')}
-                      {renderTagGroup('Locations', config.locations, 'bg-emerald-900/30 text-emerald-300 border-emerald-700/50', 'locations')}
+                      {/* Display Expanded Locations if available, else raw locations */}
+                      {renderTagGroup('Locations (Expanded)', config.expanded_locations || config.locations, 'bg-emerald-900/30 text-emerald-300 border-emerald-700/50', 'locations')}
                       {renderTagGroup('Red Lines / Avoid', config.avoid_keywords, 'bg-red-900/20 text-red-300 border-red-800/50', 'avoid')}
                       
                       {/* Mixed Group: Skills + Params */}

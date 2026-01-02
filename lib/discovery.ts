@@ -117,7 +117,7 @@ const extractJobId = (url: string): string | null => {
         // Ashby: /company/id
         if (u.hostname.includes('ashbyhq.com')) {
              const parts = path.split('/').filter(p => p);
-             return parts[parts.length - 1];
+             return parts.length >= 2 ? parts[parts.length - 1] : null;
         }
         
         // LinkedIn: /jobs/view/ID or ?currentJobId=ID
@@ -267,33 +267,18 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
 }
 
 /**
- * INTELLIGENT LOCATION NORMALIZATION (The Fix for "HongKong" vs "Hong Kong")
- * Creates a "synonym net" for locations to catch variations, typos, and abbreviations.
+ * INTELLIGENT LOCATION NORMALIZATION
+ * Basic cleanup only. The AI now handles dynamic expansion in `expandLocations`.
  */
 const normalizeLocationInput = (input: string): string => {
     const raw = input.trim();
     if (!raw) return "";
 
-    // 1. Split CamelCase (e.g. "HongKong" -> "Hong Kong")
+    // Split CamelCase (e.g. "HongKong" -> "Hong Kong") to ensure basic readability
     const spaced = raw.replace(/([a-z])([A-Z])/g, '$1 $2');
     
-    const set = new Set([raw, spaced]);
-    const lower = spaced.toLowerCase();
-
-    // 2. Common Global Abbreviations Dictionary
-    if (lower.includes('hong kong')) set.add('HK');
-    if (lower.includes('united states') || lower === 'us') set.add('USA');
-    if (lower.includes('united kingdom') || lower === 'uk') set.add('UK');
-    if (lower.includes('san francisco')) set.add('SF');
-    if (lower.includes('new york')) set.add('NYC');
-    if (lower.includes('kuala lumpur')) set.add('KL');
-    if (lower.includes('bengaluru')) set.add('Bangalore');
-    if (lower.includes('ho chi minh')) set.add('HCMC');
-    if (lower.includes('united arab emirates')) set.add('UAE');
-
-    // 3. Construct Boolean OR Query
-    const terms = Array.from(set).filter(s => s.length > 0).map(s => `"${s}"`);
-    return `(${terms.join(' OR ')})`;
+    // We quote it to be safe, but the heavy lifting is done by the expanded list.
+    return `"${spaced}"`;
 }
 
 export const buildSearchQueries = (config: any) => {
@@ -312,10 +297,17 @@ export const buildSearchQueries = (config: any) => {
     const userNegatives = (config.avoid_keywords || []).map((k: string) => `-"${k}"`);
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
     
-    // SMART LOCATION INJECTION (Using Normalizer)
-    const locationsQuery = config.locations.length > 0 
-      ? `(${config.locations.map(normalizeLocationInput).join(' OR ')})`
-      : '';
+    // SMART LOCATION INJECTION
+    // Priority: Use AI-Expanded Locations if available. Fallback to basic normalization.
+    let locationsQuery = '';
+    if (config.expanded_locations && config.expanded_locations.length > 0) {
+        // AI has already provided a rich list (e.g. ["Japan", "Tokyo", "Osaka"]).
+        // We wrap each in quotes to be precise.
+        locationsQuery = `(${config.expanded_locations.map((l: string) => `"${l}"`).join(' OR ')})`;
+    } else if (config.locations && config.locations.length > 0) {
+        // Legacy fallback
+        locationsQuery = `(${config.locations.map(normalizeLocationInput).join(' OR ')})`;
+    }
       
     const industriesQuery = config.industries && config.industries.length > 0
       ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
@@ -329,34 +321,40 @@ export const buildSearchQueries = (config: any) => {
 
     for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
         const chunk = roles.slice(i, i + ROLE_CHUNK_SIZE);
-        const roleQuery = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
+        
+        // STRICT MODE: Use Quotes for ATS/LinkedIn to avoid noise (e.g. "Product" ... "Manager")
+        const roleQueryStrict = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
+        
+        // LOOSE MODE: No Quotes. Essential for Regional/Web to allow Google to handle translations/synonyms.
+        const roleQueryLoose = `(${chunk.map((r: string) => r).join(' OR ')})`;
+        
         const suffix = roles.length > 4 ? ` (Batch ${Math.floor(i/ROLE_CHUNK_SIZE) + 1})` : '';
 
-        // 1. ATS Direct (High Signal)
+        // 1. ATS Direct (Strict)
         queries.push({ 
             name: `ATS Direct${suffix}`, 
-            q: `${atsQueryPart} ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `${atsQueryPart} ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // 2. Deep LinkedIn
+        // 2. Deep LinkedIn (Strict)
         queries.push({ 
             name: `LinkedIn${suffix}`, 
-            q: `site:linkedin.com/jobs/view ${roleQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `site:linkedin.com/jobs/view ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
-        // 3. Dynamic Regional Portals
+        // 3. Dynamic Regional Portals (Loose - For Local Language Support)
         if (config.regional_boards && config.regional_boards.length > 0) {
             const siteOperators = config.regional_boards.map((domain: string) => `site:${domain}`).join(' OR ');
             queries.push({ 
                 name: `Regional Portals${suffix}`, 
-                q: `(${siteOperators}) ${roleQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+                q: `(${siteOperators}) ${roleQueryLoose} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
             });
         }
         
-        // 4. Broad Web
+        // 4. Broad Web (Loose - For Synonym Matching)
         queries.push({ 
             name: `Web Discovery${suffix}`, 
-            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQuery} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
+            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQueryLoose} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
         });
     }
 
