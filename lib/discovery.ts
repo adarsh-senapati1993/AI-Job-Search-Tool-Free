@@ -89,10 +89,10 @@ export const extractCompanyFromUrl = (url: string): string | null => {
 const getSourceAuthority = (url: string, snippet: string): number => {
     const u = url.toLowerCase();
     let score = 1;
-    // Rank 3: Direct ATS (Source of Truth)
-    if (u.includes('greenhouse.io') || u.includes('lever.co') || u.includes('ashbyhq.com') || u.includes('workable.com') || u.includes('myworkdayjobs.com')) score = 3;
+    // Rank 3: Direct ATS (Source of Truth - Highest Priority)
+    if (u.includes('greenhouse.io') || u.includes('lever.co') || u.includes('ashbyhq.com') || u.includes('workable.com') || u.includes('myworkdayjobs.com')) score = 10;
     // Rank 2: High Quality Platforms (Deep Links)
-    else if (u.includes('linkedin.com') || u.includes('wellfound.com') || u.includes('ycombinator.com')) score = 2;
+    else if (u.includes('linkedin.com') || u.includes('wellfound.com') || u.includes('ycombinator.com')) score = 5;
     
     // Recency Bonus (0.1 per day fresh)
     const daysOldMatch = snippet.match(/(\d+)\s+day/);
@@ -135,13 +135,6 @@ const extractJobId = (url: string): string | null => {
              return parts[parts.length - 1];
         }
         
-        // Workable: /j/CODE
-        if (u.hostname.includes('workable.com')) {
-             const parts = path.split('/');
-             const jIndex = parts.indexOf('j');
-             if (jIndex !== -1 && parts[jIndex + 1]) return parts[jIndex + 1];
-        }
-
         // LinkedIn: /jobs/view/ID or ?currentJobId=ID
         if (u.hostname.includes('linkedin.com')) {
             if (path.includes('/jobs/view/')) {
@@ -154,64 +147,61 @@ const extractJobId = (url: string): string | null => {
             if (search.get('currentJobId')) return search.get('currentJobId');
         }
 
-        // Workday: often Title_ID
-        if (u.hostname.includes('myworkdayjobs.com')) {
-            const parts = path.split('/');
-            const last = parts[parts.length - 1];
-            const idMatch = last.match(/([A-Z0-9]+)$/i);
-            if (idMatch) return idMatch[1];
-        }
-
         return null;
     } catch (e) {
         return null;
     }
 }
 
+const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+
 /**
  * Creates a semantic fingerprint.
- * IMPROVED V2: Prioritizes Deterministic Job IDs over fuzzy content hashing.
+ * IMPROVED: Aggressively normalizes data to group duplicates.
  */
 const generateFingerprint = (item: RawSignal): string => {
     let company = extractCompanyFromUrl(item.url);
     if (!company) {
         try { 
-            const hostname = new URL(item.url).hostname;
-            company = hostname.replace('www.', '').split('.')[0]; 
+            // Attempt to extract from Title (e.g., "Product Manager at Stripe")
+            const atSplit = item.title.toLowerCase().split(' at ');
+            if (atSplit.length > 1) {
+                company = atSplit[atSplit.length - 1];
+            } else {
+                const hostname = new URL(item.url).hostname;
+                company = hostname.replace('www.', '').split('.')[0]; 
+            }
         } catch(e) { 
             company = 'unknown'; 
         }
     }
     
+    // Normalize Company Name (e.g. "Stripe Inc" -> "stripe")
+    const cleanCompany = normalizeString(company || 'unknown');
+
     // 1. Deterministic ID Check (The Gold Standard)
     const jobId = extractJobId(item.url);
     if (jobId) {
-        // We still prepend company to ensure ID collisions between systems don't happen
-        return `ID:${company?.toLowerCase()}:${jobId}`;
+        // ID:stripe:123456
+        return `ID:${cleanCompany}:${jobId}`;
     }
 
-    // 2. Fallback: Enhanced Fuzzy Hash
-    // Normalize Title
-    let title = item.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // 2. Fuzzy Matching for Aggregation
+    // "Senior Product Manager" -> "seniorproductmanager"
+    let title = normalizeString(item.title);
     
-    // Extract Team/Context to differentiate roles
-    const teamMatch = item.title.match(/\b(Payments|Platform|Infrastructure|Growth|Data|Backend|Frontend|Mobile|Trust|Safety|GenAI|ML)\b/i);
-    const team = teamMatch ? teamMatch[0].toLowerCase() : 'gen';
+    // Remove "at Company" from title for hash if present
+    if (company && title.includes(cleanCompany)) {
+        title = title.replace(cleanCompany, '');
+    }
 
-    // Full Snippet Hash (Not just first 40 chars)
-    // Remove company name from snippet to reduce boilerplate noise
-    const cleanSnippet = item.snippet.toLowerCase()
-        .replace(new RegExp(company?.toLowerCase() || 'xyz', 'g'), '')
-        .replace(/[^a-z0-9]/g, '');
-    
-    // Take first 100 chars of *unique* content (better than 40 chars of boilerplate)
-    const snippetHash = cleanSnippet.slice(0, 100); 
-    
-    return `HASH:${company?.toLowerCase()}:${title}:${team}:${snippetHash}`;
+    // Hash the first 20 chars of title + company. 
+    // This groups "Sr PM at Stripe" and "Senior Product Manager at Stripe" if we normalize properly,
+    // but standardizing titles is hard. We rely on the fact that most duplicates have VERY similar titles.
+    return `FUZZY:${cleanCompany}:${title.slice(0, 15)}`;
 };
 
 // --- STRATEGY: URL VALIDATOR ---
-// Enforces "Deep Link" quality. Rejects generic search pages to ensure functional Apply links.
 const isHighQualityJobLink = (url: string): boolean => {
     try {
         const u = new URL(url);
@@ -219,129 +209,93 @@ const isHighQualityJobLink = (url: string): boolean => {
         const search = u.search.toLowerCase();
         const hostname = u.hostname.toLowerCase();
         
-        // 1. REJECT: Generic Search/Listings/Tags/Categories
-        if (path === '/' || path === '/jobs' || path === '/jobs/' || path === '/careers' || path === '/careers/') return false;
-        if (path.endsWith('/search') || path.endsWith('/search/')) return false;
-        
-        if (path.includes('/search') && (search.includes('?q=') || search.includes('&q='))) return false;
-
+        // REJECT GENERIC PAGES
+        if (path === '/' || path === '/jobs' || path === '/jobs/' || path === '/careers') return false;
+        if (path.includes('/search') && !hostname.includes('linkedin.com')) return false; // LinkedIn search links can be valid specific queries
         if (path.includes('/tags/') || path.includes('/category/') || path.includes('/archive/')) return false; 
-        if (path.includes('/blog/') || path.includes('/news/') || path.includes('/articles/') || path.includes('/content/')) return false;
+        if (path.includes('/blog/') || path.includes('/news/')) return false;
 
-        // 2. TARGETED: LinkedIn
+        // TARGETED: LinkedIn
         if (hostname.includes('linkedin.com')) {
             if (path.includes('/jobs/view/') || path.includes('/jobs/collections/')) return true;
             if (path.includes('/jobs/search') && search.includes('currentjobid=')) return true;
             return false;
         }
         
-        // 3. TARGETED: Indeed
-        if (hostname.includes('indeed.com')) {
-             if (!path.includes('/viewjob') && !path.includes('/rc/clk')) return false;
-        }
-
-        // 4. TARGETED: ATS Systems
-        if (hostname.includes('greenhouse.io') && path.length < 5) return false; 
-        if (hostname.includes('lever.co') && path.length < 5) return false;
-
         return true;
     } catch (e) {
         return false;
     }
 }
 
-// --- HARDENED PRE-FILTER LOGIC (Smart Match V2) ---
-
-const CLEAN_REGEX = /[\(\[\{].*?[\)\]\}]/g; // Remove (...) [...]
-const SEPARATOR_REGEX = /[\|\-\/\\]/g; // Remove | - / \
-
-const ABBREVIATIONS: Record<string, string> = {
-    'sr': 'senior',
-    'jr': 'junior',
-    'mgr': 'manager',
-    'asst': 'assistant',
-    'assoc': 'associate',
-    'dir': 'director',
-    'vp': 'vice president',
-    'svp': 'senior vice president',
-    'evp': 'executive vice president',
-    'pr': 'principal', // Context dependent but helpful
-    'tech': 'technical',
-    'eng': 'engineer',
-    'dev': 'developer',
-    'pm': 'product manager'
-};
-
-const normalizeJobTitle = (title: string): string => {
-    let clean = title.toLowerCase();
-    clean = clean.replace(CLEAN_REGEX, ''); // Remove content in parens
-    clean = clean.replace(SEPARATOR_REGEX, ' '); // Replace separators with space
-    clean = clean.replace(/\b(m\/f\/x|m\/f\/d|f\/m\/d)\b/g, ''); // Remove gender tags
-    clean = clean.replace(/[^a-z0-9\s]/g, ''); // Remove other special chars but keep spaces
+/**
+ * CLIENT-SIDE "BOUNCER"
+ * Strictly enforces that the found Job Title actually matches the user's intent 
+ * BEFORE we send it to the AI (saving money/latency).
+ */
+const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]): boolean => {
+    const t = title.toLowerCase();
     
-    // Normalize abbreviations (Word by word)
-    const words = clean.split(/\s+/).map(w => ABBREVIATIONS[w] || w);
-    return words.join(' ').trim();
-};
-
-const ANTI_PATTERNS = ["internship", "volunteer", "unpaid", "training program", "bootcamp", "student"];
-const JUNIOR_TERMS = ["junior", "associate", "intern", "entry level", "graduate", "trainee", "apprentice"];
-const SENIOR_TERMS = ["senior", "staff", "principal", "lead", "head", "director", "vp", "manager"];
-
-const isRoleMatch = (title: string, targetRoles: string[]): boolean => {
-    const normalizedTitle = normalizeJobTitle(title);
-
-    // 1. Anti-Pattern Check
-    if (ANTI_PATTERNS.some(p => normalizedTitle.includes(p))) return false;
-
-    // 2. Seniority Guardrails
-    const userIsTargetingSenior = targetRoles.some(r => SENIOR_TERMS.some(st => r.toLowerCase().includes(st)));
-    if (userIsTargetingSenior) {
-        if (JUNIOR_TERMS.some(jt => new RegExp(`\\b${jt}\\b`).test(normalizedTitle))) {
-            return false;
-        }
+    // 1. Safe Pass: Generic Titles
+    // If the title is generic, we can't judge it yet. Let the AI look at the snippet content later.
+    if (t.includes('careers') || t.includes('jobs at') || t.includes('join our team') || t.includes('openings')) {
+        return true;
     }
 
-    // 3. Flexible Matching Strategy
-    return targetRoles.some(target => {
-        const normalizedTarget = normalizeJobTitle(target);
-        
-        // Strategy A: Strict Phrase Match (The "Gold Standard")
-        // "Senior Product Manager" matches "Senior Product Manager - Payments"
-        if (normalizedTitle.includes(normalizedTarget)) return true;
+    // 2. Hard Fail: Stop Words (Common unrelated roles that appear in sidebar results)
+    // If user wants "Engineer", and we found "Account Executive", kill it immediately.
+    const stopWords = ['account executive', 'sales representative', 'customer support', 'recruiter', 'hr manager', 'legal counsel'];
+    // Only apply stop words if the user ISN'T looking for them.
+    const userIsLookingForStopWord = targetRoles.some(r => stopWords.some(sw => r.toLowerCase().includes(sw)));
+    
+    if (!userIsLookingForStopWord) {
+        if (stopWords.some(sw => t.includes(sw))) return false;
+    }
 
-        // Strategy B: Bag of Words (The "Interrupted Phrase" Handler)
-        // Enables "Senior Product Manager" to match "Senior Technical Product Manager"
-        // OR "Product Manager - Senior"
-        const targetWords = normalizedTarget.split(/\s+/).filter(w => w.length > 2); // Only significant words
-        
-        if (targetWords.length > 1) {
-            const allWordsPresent = targetWords.every(w => normalizedTitle.includes(w));
-            if (allWordsPresent) return true;
-        }
-
-        return false;
+    // 3. Keyword Overlap Check
+    // Break target roles into tokens. e.g. "Product Manager" -> ["product", "manager"]
+    // At least one "significant" token must exist in the found title.
+    const significantTokens = new Set<string>();
+    targetRoles.forEach(role => {
+        role.toLowerCase().split(/[\s/-]/).forEach(word => {
+            if (word.length > 2 && word !== 'senior' && word !== 'lead' && word !== 'junior') {
+                significantTokens.add(word);
+            }
+        });
     });
-};
+
+    const titleWords = t.split(/[\s/-]/);
+    const hasOverlap = titleWords.some(word => significantTokens.has(word));
+
+    return hasOverlap;
+}
 
 export const buildSearchQueries = (config: any) => {
     if (!config || !config.target_roles) {
-        throw new Error("Search Configuration is missing. Please go to Settings > Profile Config first.");
+        throw new Error("Search Configuration is missing.");
     }
 
     const lookbackRaw = config.search_lookback || '14d';
-    // UTC Date Fix
     const lookbackDays = parseInt(lookbackRaw.replace(/\D/g, '')) || 14;
     const now = new Date();
     const cutoffDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - lookbackDays));
     const dateStr = cutoffDate.toISOString().split('T')[0];
 
-    // Negative Filters Injection
-    const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog', '-inurl:news', '-inurl:article'];
+    // NEGATIVE FILTERING
+    const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog'];
     const userNegatives = (config.avoid_keywords || []).map((k: string) => `-"${k}"`);
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
     
-    // Chunk Roles to avoid Query Explosion (Max ~32 words per query)
+    // INDUSTRY & LOCATION INJECTION
+    const locationsQuery = config.locations.length > 0 
+      ? `(${config.locations.map((l: string) => `"${l}"`).join(' OR ')})`
+      : '';
+      
+    // Crucial: Use Industry constraints in search to reduce noise
+    const industriesQuery = config.industries && config.industries.length > 0
+      ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
+      : '';
+
     const ROLE_CHUNK_SIZE = 5;
     const roleChunks = [];
     const roles = config.target_roles;
@@ -349,66 +303,32 @@ export const buildSearchQueries = (config: any) => {
         roleChunks.push(roles.slice(i, i + ROLE_CHUNK_SIZE));
     }
     
-    const locationsQuery = config.locations.length > 0 
-      ? `(${config.locations.map((l: string) => `"${l}"`).join(' OR ')})`
-      : '';
-
     const queries: { name: string, q: string }[] = [];
 
-    // For each chunk of roles, generate the core query clusters
     roleChunks.forEach((chunk, index) => {
         const suffix = roleChunks.length > 1 ? ` (Batch ${index + 1})` : '';
         const rolesQuery = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
-
+        
+        // ATS Direct (High Signal)
         queries.push({ 
             name: `ATS Direct${suffix}`, 
-            q: `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:myworkdayjobs.com OR site:apply.workable.com ${rolesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            q: `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:myworkdayjobs.com ${rolesQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
+        // Deep LinkedIn (High Volume)
         queries.push({ 
-            name: `Career Portals${suffix}`, 
-            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com -site:indeed.com ${rolesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
+            name: `LinkedIn${suffix}`, 
+            q: `site:linkedin.com/jobs/view ${rolesQuery} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
         });
         
+        // Broad Web (Catch-all)
         queries.push({ 
-            name: `LinkedIn Deep${suffix}`, 
-            q: `site:linkedin.com/jobs/view ${rolesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            name: `Web Discovery${suffix}`, 
+            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${rolesQuery} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
         });
-        
-        // Regional boards
-        const userLocations = (config.locations || []).map((l: string) => l.toLowerCase());
-        const addedBoards = new Set<string>();
-
-        for (const [regionKey, queryPart] of Object.entries(REGION_BOARDS)) {
-            if (userLocations.some((ul: string) => ul.includes(regionKey))) {
-                if (!addedBoards.has(queryPart)) {
-                    queries.push({
-                        name: `Regional: ${regionKey.toUpperCase()}${suffix}`,
-                        q: `${queryPart} ${rolesQuery} ${negativeFilters} after:${dateStr}`
-                    });
-                    addedBoards.add(queryPart);
-                }
-            }
-        }
     });
 
     return queries;
-};
-
-const preFilterSignals = (signals: RawSignal[], config: any): RawSignal[] => {
-    return signals.filter(signal => {
-        // 1. URL Quality Check (Must be a specific job post, not a search page)
-        if (!isHighQualityJobLink(signal.url)) return false;
-
-        // 2. Title Match (Heuristic)
-        // If strict mode is on or just generally, we want to ensure the title vaguely resembles our target.
-        // The isRoleMatch function handles synonyms and seniority logic.
-        if (config.target_roles && config.target_roles.length > 0) {
-            if (!isRoleMatch(signal.title, config.target_roles)) return false;
-        }
-
-        return true;
-    });
 };
 
 export const searchForSignals = async (config: any, onLog: LogCallback, signal?: AbortSignal): Promise<RawSignal[]> => {
@@ -417,17 +337,16 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
 
   const queries = buildSearchQueries(config);
   const depthMode = config.search_depth || 'standard';
-  const pages = depthMode === 'comprehensive' ? 5 : depthMode === 'deep' ? 3 : 1;
+  const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
 
-  onLog(`Initializing Parallel Search (${queries.length} clusters x ${pages} pages)...`, 'info');
+  onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
 
   const tasks: { q: any, page: number }[] = [];
   queries.forEach(q => {
       for (let i = 0; i < pages; i++) tasks.push({ q, page: i });
   });
 
-  // Parallel Execution with Promise.allSettled and Timeout
-  const BATCH_SIZE = 10; 
+  const BATCH_SIZE = 8; 
   let rawResults: RawSignal[] = [];
 
   for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
@@ -435,55 +354,60 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
       const batch = tasks.slice(i, i + BATCH_SIZE);
       
       const batchPromises = batch.map(task => {
-          return Promise.race([
-              performSerperSearch(serperKey, task.q.q, task.page * 20),
-              new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
-          ]).then(res => res.map((r: any, idx: number) => ({
-             id: `sig_${Date.now()}_${i}_${idx}`,
-             source: task.q.name,
-             url: r.link,
-             title: r.title,
-             snippet: r.snippet,
-             timestamp: r.date || new Date().toISOString(),
-             metadata: { query: task.q.q, rank: idx }
-          }))).catch(e => {
-              // Log but don't fail batch
-              return [];
-          });
+          return performSerperSearch(serperKey, task.q.q, task.page * 20)
+              .then(res => res.map((r: any, idx: number) => ({
+                 id: `sig_${Date.now()}_${i}_${idx}`,
+                 source: task.q.name,
+                 url: r.link,
+                 title: r.title,
+                 snippet: r.snippet,
+                 timestamp: r.date || new Date().toISOString(),
+                 metadata: { query: task.q.q, rank: idx }
+              })))
+              .catch(() => []);
       });
 
-      const batchResults = await Promise.allSettled(batchPromises);
-      batchResults.forEach(res => {
-          if (res.status === 'fulfilled') rawResults.push(...res.value);
-      });
-      
-      await new Promise(r => setTimeout(r, 500)); // Rate limit backoff
+      const batchResults = await Promise.all(batchPromises);
+      batchResults.forEach(res => rawResults.push(...res));
+      await new Promise(r => setTimeout(r, 200)); 
   }
 
-  // Enhanced Deduplication
+  // --- FILTERING & DEDUPLICATION STRATEGY ---
+  
   const fingerprintMap = new Map<string, RawSignal>();
   let duplicates = 0;
+  let rejectedByGuard = 0;
 
   rawResults.forEach(item => {
-      if (!item.url || item.url.includes('google.com')) return;
+      // 1. Basic URL Check
+      if (!isHighQualityJobLink(item.url)) return;
+
+      // 2. THE BOUNCER: Strict Title Check
+      if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
+          rejectedByGuard++;
+          return;
+      }
+      
       const fingerprint = generateFingerprint(item);
       const existing = fingerprintMap.get(fingerprint);
       
+      const scoreNew = getSourceAuthority(item.url, item.snippet);
+      
       if (existing) {
-          duplicates++;
-          const scoreNew = getSourceAuthority(item.url, item.snippet);
           const scoreOld = getSourceAuthority(existing.url, existing.snippet);
-          if (scoreNew > scoreOld) fingerprintMap.set(fingerprint, item);
+          
+          if (scoreNew > scoreOld) {
+              fingerprintMap.set(fingerprint, item);
+          }
+          duplicates++;
       } else {
           fingerprintMap.set(fingerprint, item);
       }
   });
 
   const unique = Array.from(fingerprintMap.values());
-  onLog(`Deduplication: ${rawResults.length} -> ${unique.length} unique signals.`, 'success');
+  onLog(`Analysis: Found ${rawResults.length} raw signals.`, 'info');
+  onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} irrelevant titles (e.g. Accountant vs Engineer).`, 'success');
   
-  const filtered = preFilterSignals(unique, config);
-  onLog(`Pre-Filter: ${unique.length} -> ${filtered.length} candidates passed Geo/Role checks.`, 'info');
-
-  return filtered;
+  return unique;
 };

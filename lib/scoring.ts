@@ -60,8 +60,7 @@ const calculateDaysSincePosted = (dateStr?: string): number => {
 export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProgress?: (msg: string) => void): Promise<ScoredLead[]> => {
   if (signals.length === 0) return [];
 
-  // Optimized Batch Size
-  const JOBS_PER_PROMPT = 20; 
+  const JOBS_PER_PROMPT = 15; // Slightly reduced for better accuracy
   const chunks = [];
   for (let i = 0; i < signals.length; i += JOBS_PER_PROMPT) chunks.push(signals.slice(i, i + JOBS_PER_PROMPT));
 
@@ -72,24 +71,33 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
       const jobsList = chunk.map(s => `ID: ${s.id} | TITLE: ${s.title} | LINK: ${s.url} | SNIPPET: ${s.snippet.slice(0, 600)}`).join('\n\n');
 
       const prompt = `
-      ACT AS: Strict Technical Recruiter.
-      CANDIDATE: Roles: ${userConfig.target_roles.join(', ')} | Locs: ${userConfig.locations.join(', ')} | Skills: ${userConfig.skills?.slice(0,8).join(', ')}
+      ACT AS: Ruthless Senior Technical Recruiter.
       
-      JOBS:
+      CANDIDATE TARGET:
+      - EXACT Roles Wanted: ${userConfig.target_roles.join(', ')}
+      - Locations: ${userConfig.locations.join(', ')}
+      - Industries: ${userConfig.industries?.join(', ') || "Any"}
+      - Red Lines (Immediate Disqualifiers): ${userConfig.avoid_keywords?.join(', ') || "None"}
+      
+      JOBS TO EVALUATE:
       ${jobsList}
       
       TASK: Analyze each job. Return JSON array "results".
       
-      RULES:
-      1. STRICT ROLE MATCH: If title does NOT match Target Roles (e.g. "Product Owner" != "Product Manager"), set "is_role_match": false.
-      2. SALARY: Extract if present. Format: "USD 150k-200k" or "Not disclosed".
-      3. SCORE: 0-100. Be critical.
+      STRICT GATEKEEPING RULES:
+      1. ROLE MISMATCH = IMMEDIATE REJECT.
+         - If User wants "Product Manager" and Job is "Project Manager", is_role_match = FALSE.
+         - If User wants "Software Engineer" and Job is "Solutions Architect" (Sales), is_role_match = FALSE.
+         - Only synonymous roles are allowed (e.g. "Principal PM" is ok for "Senior PM").
+      2. RED LINE VIOLATION = IMMEDIATE REJECT.
+         - If snippet contains "AVOID" keyword, MATCH_SCORE < 10.
+      3. INDUSTRY MISMATCH: If user specified Industries, and job is clearly outside (e.g. Healthcare job when user wants Fintech), penalty -50 points.
       
-      SCHEMA:
+      OUTPUT SCHEMA:
       {
         "id": "string",
-        "is_role_match": boolean,
-        "match_score": number,
+        "is_role_match": boolean, 
+        "match_score": number, // 0-100
         "company_name": "string",
         "role_title": "string",
         "salary": "string",
@@ -109,6 +117,7 @@ export const scoreSignals = async (signals: RawSignal[], userConfig: any, onProg
               const daysOld = calculateDaysSincePosted(signal.timestamp);
               
               const isRoleMatch = analysis?.is_role_match !== false;
+              // If role doesn't match, forced 0 score.
               const finalScore = isRoleMatch ? (analysis?.match_score || 0) : 0;
 
               return {

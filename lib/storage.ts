@@ -18,6 +18,7 @@ export const getDraft = (): any | null => { if (typeof window !== 'undefined') {
 export const clearDraft = () => { if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEYS.PROFILE_DRAFT); };
 export const saveLatestRun = (leads: any[]) => { if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEYS.LATEST_RUN, JSON.stringify({ timestamp: Date.now(), leads })); };
 export const getLatestRun = (): { timestamp: number, leads: any[] } | null => { if (typeof window !== 'undefined') { const d = localStorage.getItem(STORAGE_KEYS.LATEST_RUN); return d ? JSON.parse(d) : null; } return null; };
+export const clearLatestRun = () => { if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEYS.LATEST_RUN); };
 export const backupKeys = () => { if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEYS.KEY_BACKUP, JSON.stringify({ perplexity: getKey(STORAGE_KEYS.PERPLEXITY_KEY), serper: getKey(STORAGE_KEYS.SERPER_KEY) })); };
 export const getBackedUpKeys = () => { if (typeof window !== 'undefined') { const d = localStorage.getItem(STORAGE_KEYS.KEY_BACKUP); return d ? JSON.parse(d) : null; } return null; };
 export const clearKeys = () => { if (typeof window !== 'undefined') { localStorage.clear(); } };

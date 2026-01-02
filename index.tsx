@@ -66,7 +66,7 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
         <Card className="bg-slate-800/50 border-slate-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
             
-            {/* Edit Button overlay for the whole card context */}
+            {/* Edit Button overlay */}
             <div className="absolute top-0 right-0">
                <Button variant="secondary" onClick={onEditConfig} className="text-xs h-8 flex items-center gap-1">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -81,27 +81,29 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
                     <div className="flex items-start gap-3">
                       <div className="w-6 h-6 rounded bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs">🎯</div>
                       <div>
-                        <div className="text-sm font-medium text-slate-300">Roles</div>
-                        <div className="text-white font-mono text-sm">{config.target_roles?.join(', ')}</div>
+                        <div className="text-xs font-semibold text-slate-400 uppercase">Roles</div>
+                        <div className="text-white font-mono text-sm leading-relaxed">{config.target_roles?.join(' / ')}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
                       <div className="w-6 h-6 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">🌍</div>
                       <div>
-                        <div className="text-sm font-medium text-slate-300">Locations</div>
+                        <div className="text-xs font-semibold text-slate-400 uppercase">Locations</div>
                         <div className="text-white font-mono text-sm">{config.locations?.join(', ')}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs">⏱️</div>
+                      <div className="w-6 h-6 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs">🏭</div>
                       <div>
-                        <div className="text-sm font-medium text-slate-300">Search Window</div>
-                        <div className="text-white font-mono text-sm">
-                            {config.search_lookback === '1d' ? 'Last 24 Hours' : 
-                             config.search_lookback === '3d' ? 'Last 3 Days' :
-                             config.search_lookback === '7d' ? 'Last 7 Days' :
-                             config.search_lookback === '30d' ? 'Last 30 Days' : 'Last 14 Days'}
-                        </div>
+                        <div className="text-xs font-semibold text-slate-400 uppercase">Industries</div>
+                        <div className="text-white font-mono text-sm">{config.industries?.length ? config.industries.join(', ') : 'Any'}</div>
+                      </div>
+                    </div>
+                     <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded bg-red-500/20 text-red-400 flex items-center justify-center text-xs">🚫</div>
+                      <div>
+                        <div className="text-xs font-semibold text-slate-400 uppercase">Avoid (Red Lines)</div>
+                        <div className="text-white font-mono text-sm">{config.avoid_keywords?.length ? config.avoid_keywords.join(', ') : 'None'}</div>
                       </div>
                     </div>
                   </div>
@@ -122,13 +124,13 @@ const Dashboard = ({ onEditConfig, onRestart, onFactoryReset }: DashboardProps) 
 
                <div>
                    <div className="flex flex-wrap gap-2 mb-2">
-                     {config.skills?.slice(0, 8).map((skill: string, i: number) => (
+                     {config.skills?.slice(0, 10).map((skill: string, i: number) => (
                         <span key={i} className="px-2 py-1 bg-slate-700 rounded text-xs text-slate-300 border border-slate-600">
                             {skill}
                         </span>
                      ))}
-                     {config.skills?.length > 8 && (
-                        <span className="px-2 py-1 text-xs text-slate-500">+{config.skills.length - 8} more</span>
+                     {config.skills?.length > 10 && (
+                        <span className="px-2 py-1 text-xs text-slate-500">+{config.skills.length - 10} more</span>
                      )}
                    </div>
                </div>
@@ -171,7 +173,6 @@ const App = () => {
     checkState();
   }, []);
 
-  // Soft Restart: Backs up keys, clears current session, goes to setup (pre-filled)
   const handleSoftRestart = () => {
     backupKeys();
     clearKeys();
@@ -179,7 +180,6 @@ const App = () => {
     setTimeout(() => setAppState('setup'), 100);
   };
 
-  // Factory Reset: Wipes everything including backups
   const handleFactoryReset = () => {
     clearKeys(); 
     localStorage.removeItem(STORAGE_KEYS.KEY_BACKUP);

@@ -3,7 +3,7 @@ import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { parseCandidateProfile, ExplicitConstraints, ProfileInputs, CandidateProfile } from '../lib/ai';
-import { getKey, saveConfig, STORAGE_KEYS, getConfig, saveDraft, getDraft, clearDraft, saveKey } from '../lib/storage';
+import { getKey, saveConfig, STORAGE_KEYS, getConfig, saveDraft, getDraft, clearDraft, saveKey, clearLatestRun } from '../lib/storage';
 import * as pdfjsLibProxy from 'pdfjs-dist';
 
 // Handle ESM/CJS interop for pdfjs-dist
@@ -132,18 +132,22 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
     }
   };
 
+  // Immediate Client-Side Extraction
   const heuristicParse = (text: string) => {
       const email = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi)?.[0] || "";
-      const skillsMatch = text.match(/skills?:?(.+?)(?:\n\n|\n[A-Z])/i);
-      const skillsFound = skillsMatch ? skillsMatch[1].split(/,|•|\//).map(s => s.trim()).filter(s => s.length > 2).slice(0, 10) : [];
+      const linkedin = text.match(/linkedin\.com\/in\/([a-zA-Z0-9-]+)/)?.[0] || "";
       
-      const commonRoles = ["Product Manager", "Software Engineer", "Frontend Developer", "Backend Developer", "Full Stack", "Data Scientist", "Designer"];
+      const skillsMatch = text.match(/(?:skills|technologies|stack):?(.+?)(?:\n\n|\n[A-Z])/i);
+      const skillsFound = skillsMatch ? skillsMatch[1].split(/,|•|\/|\|/).map(s => s.trim()).filter(s => s.length > 2 && s.length < 20).slice(0, 10) : [];
+      
+      const commonRoles = ["Product Manager", "Software Engineer", "Frontend Developer", "Backend Developer", "Full Stack", "Data Scientist", "Designer", "Founder", "CTO"];
       const rolesFound = commonRoles.filter(r => text.includes(r));
 
       return {
           skills: skillsFound,
-          roles: rolesFound.length ? rolesFound : ["Professional"],
-          locations: ["Remote", "Hybrid"] 
+          roles: rolesFound.length ? rolesFound : [],
+          locations: [],
+          linkedin
       };
   };
 
@@ -156,6 +160,12 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
     setIsLoading(true);
     setError(null);
     const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
+
+    // 1. OPTIMISTIC UPDATE (Instant)
+    const quickData = heuristicParse(resumeText);
+    if (quickData.skills.length > 0 && !skills) setSkills(quickData.skills.join(', '));
+    if (quickData.roles.length > 0 && !roles) setRoles(quickData.roles.join(', '));
+    if (quickData.linkedin && !linkedinUrl) setLinkedinUrl(`https://${quickData.linkedin}`);
 
     try {
         const inputs: ProfileInputs = { text: resumeText, linkedinUrl: linkedinUrl };
@@ -171,13 +181,6 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
         
     } catch (err: any) {
         console.error("Auto-Fill Error:", err);
-        
-        // --- FALLBACK LOGIC ---
-        const heuristic = heuristicParse(resumeText);
-        setSkills(heuristic.skills.join(', '));
-        setRoles(heuristic.roles.join(', '));
-        setLocations(heuristic.locations.join(', '));
-        
         setError("⚠️ AI Analysis failed. We've done a basic text scan instead. Please verify.");
     } finally {
         setIsLoading(false);
@@ -245,6 +248,9 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
       saveConfig(finalProfile);
       if (resumeText.trim()) saveKey(STORAGE_KEYS.RAW_RESUME, resumeText);
 
+      // Force fresh discovery by clearing previous run data
+      clearLatestRun();
+      
       clearDraft(); 
       onComplete();
     } catch (err: any) {
@@ -258,6 +264,8 @@ export const ProfileConfig = ({ onComplete, onBack }: ProfileConfigProps) => {
               seniority_level: "Unknown"
           };
           saveConfig(fallbackProfile);
+          
+          clearLatestRun();
           clearDraft();
           onComplete();
           return;

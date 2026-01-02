@@ -1,9 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  body {
-    @apply bg-slate-950 text-slate-50 antialiased;
-  }
-}
+/* 
+  Styles are currently handled via Tailwind CDN in index.html 
+  to support browser-based previews without a PostCSS build step.
+*/
