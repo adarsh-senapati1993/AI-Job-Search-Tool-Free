@@ -16,7 +16,7 @@ Standard job searching is **Pull-based**: You go to LinkedIn, type keywords, and
 
 ---
 
-## 🚀 New Features (v2.2)
+## 🚀 New Features
 
 * **📡 Strategy Room:** Visual confirmation of all search clusters (ATS, Regional, Web) before you launch.
 * **🧠 Intelligent Location Hierarchy (V4.2 - Type-First Strictness):** The Brain (AI) now performs a strict classification step before expansion to prevent "context bleeding".
@@ -29,61 +29,12 @@ Standard job searching is **Pull-based**: You go to LinkedIn, type keywords, and
 
 ---
 
-## 🏗️ Under the Hood: Architecture & Logic
-
-For the engineers and product minds, here is how the system operates. The pipeline uses distinct "Gates" to ensure quality and reduce cost.
-
-### 1. The Data Pipeline
-
-#### Phase A: The Calibration Gate (ProfileConfig)
-* **Input:** PDF Resume + LinkedIn URL.
-* **The AI Task:** Perplexity Sonar extracts structured metadata (Seniority, Domain, Hard Skills).
-* **Role Normalization:** It maps your resume titles to standard market titles to ensure the search terms match what recruiters are actually posting.
-
-#### Phase B: The Discovery Engine (The "Eyes")
-* **Technology:** Serper API (Google Search Wrapper).
-* **Mechanism:** The system constructs complex Boolean strings on the fly:
-    ```
-    site:greenhouse.io ("Product Manager" OR "PM") ("Remote" OR "London") -intitle:resume after:2024-01-01
-    ```
-* **Cluster Strategy:** We execute parallel searches across 4 distinct clusters:
-    1.  **ATS Direct:** Scans Greenhouse, Lever, Ashby, Workable directly.
-    2.  **Deep LinkedIn:** Scans public LinkedIn post pages (bypassing the login wall).
-    3.  **Regional Satellites:** Dynamically identified local boards (e.g., `jobs.ch` in Swiss or `naukri.com` in India).
-    4.  **Web Discovery:** Catch-all for `site:careers.*` pages.
-
-#### Phase C: Filtration & Deduplication
-Before paying for AI scoring, we use deterministic code to clean the data:
-* **Fingerprinting:** We create a unique hash of `Company + Title + Snippet`. If "Stripe PM" is found on both LinkedIn and Greenhouse, we merge them (prioritizing the direct Greenhouse link).
-* **The "Bouncer":** A lightweight client-side check. If the title is "Sales Rep" but you want "Engineer," it is discarded immediately without using LLM tokens.
-* **Novelty Check:** The system checks LocalStorage to see if this URL was processed in the last 7 days. If yes, it hides it.
-
-#### Phase D: The Scoring Engine (The "Brain")
-* **Technology:** Perplexity Sonar.
-* **The "Ruthless Recruiter" Prompt:** We instruct the AI to be adversarial, not helpful.
-    * *Rule 1:* Seniority mismatch? **Score 0.**
-    * *Rule 2:* "Hybrid" location when user wants "Remote"? **Score 0.**
-    * *Rule 3:* Found a "Red Line" keyword (e.g., "Crypto")? **Score 0.**
-
-### 2. Hallucination Prevention Strategy
-Hallucination is the biggest risk in AI tools. We mitigate this via **Separation of Concerns**:
-
-| Task | Component | Why? |
-| :--- | :--- | :--- |
-| **Finding URLs** | Serper (Google) | LLMs cannot browse the live web reliably. Google is the source of truth for "Does this link exist?" |
-| **Reading Text** | Perplexity | LLMs are excellent at reading text *provided* to them. |
-| **Decisions** | TypeScript Code | We don't ask AI "Is this duplicate?" We use code hashing. We don't ask AI "Is this link valid?" We use URL regex. |
-
-**The "Glass Box" Rule:**
-In the UI, every score is clickable. If the AI claims a skill match, you can click the score to see the exact reasoning. Transparency is the only cure for hallucination.
-
----
 
 ## ⚡ Quick Start Guide (For Absolute Beginners)
 
 You do not need to be a coder to use this. Follow these steps exactly.
 
-### Phase 1: Preparation
+## Preparation
 
 1.  **Install Node.js (The Runtime)**
     * Go to [nodejs.org](https://nodejs.org/).
@@ -103,8 +54,6 @@ You do not need to be a coder to use this. Follow these steps exactly.
     * Go to [Serper.dev](https://serper.dev/).
     * Sign up (Free).
     * You get 2,500 free searches. Copy the **API Key** from the dashboard.
-
----
 
 ## 🛠️ Installation (Step-by-Step)
 
@@ -192,6 +141,56 @@ You do not need to be a coder to use this. Follow these steps exactly.
 
 **"I want to delete everything and start fresh"**
 * Click the **Settings** button in the top right, then click **Factory Reset**. This completely wipes all keys, profile data, and caches.
+
+---
+
+## 🏗️ Under the Hood: Architecture & Logic
+
+For the engineers and product minds, here is how the system operates. The pipeline uses distinct "Gates" to ensure quality and reduce cost.
+
+### 1. The Data Pipeline
+
+#### Phase A: The Calibration Gate (ProfileConfig)
+* **Input:** PDF Resume + LinkedIn URL.
+* **The AI Task:** Perplexity Sonar extracts structured metadata (Seniority, Domain, Hard Skills).
+* **Role Normalization:** It maps your resume titles to standard market titles to ensure the search terms match what recruiters are actually posting.
+
+#### Phase B: The Discovery Engine (The "Eyes")
+* **Technology:** Serper API (Google Search Wrapper).
+* **Mechanism:** The system constructs complex Boolean strings on the fly:
+    ```
+    site:greenhouse.io ("Product Manager" OR "PM") ("Remote" OR "London") -intitle:resume after:2024-01-01
+    ```
+* **Cluster Strategy:** We execute parallel searches across 4 distinct clusters:
+    1.  **ATS Direct:** Scans Greenhouse, Lever, Ashby, Workable directly.
+    2.  **Deep LinkedIn:** Scans public LinkedIn post pages (bypassing the login wall).
+    3.  **Regional Satellites:** Dynamically identified local boards (e.g., `jobs.ch` in Swiss or `naukri.com` in India).
+    4.  **Web Discovery:** Catch-all for `site:careers.*` pages.
+
+#### Phase C: Filtration & Deduplication
+Before paying for AI scoring, we use deterministic code to clean the data:
+* **Fingerprinting:** We create a unique hash of `Company + Title + Snippet`. If "Stripe PM" is found on both LinkedIn and Greenhouse, we merge them (prioritizing the direct Greenhouse link).
+* **The "Bouncer":** A lightweight client-side check. If the title is "Sales Rep" but you want "Engineer," it is discarded immediately without using LLM tokens.
+* **Novelty Check:** The system checks LocalStorage to see if this URL was processed in the last 7 days. If yes, it hides it.
+
+#### Phase D: The Scoring Engine (The "Brain")
+* **Technology:** Perplexity Sonar.
+* **The "Ruthless Recruiter" Prompt:** We instruct the AI to be adversarial, not helpful.
+    * *Rule 1:* Seniority mismatch? **Score 0.**
+    * *Rule 2:* "Hybrid" location when user wants "Remote"? **Score 0.**
+    * *Rule 3:* Found a "Red Line" keyword (e.g., "Crypto")? **Score 0.**
+
+### 2. Hallucination Prevention Strategy
+Hallucination is the biggest risk in AI tools. We mitigate this via **Separation of Concerns**:
+
+| Task | Component | Why? |
+| :--- | :--- | :--- |
+| **Finding URLs** | Serper (Google) | LLMs cannot browse the live web reliably. Google is the source of truth for "Does this link exist?" |
+| **Reading Text** | Perplexity | LLMs are excellent at reading text *provided* to them. |
+| **Decisions** | TypeScript Code | We don't ask AI "Is this duplicate?" We use code hashing. We don't ask AI "Is this link valid?" We use URL regex. |
+
+**The "Glass Box" Rule:**
+In the UI, every score is clickable. If the AI claims a skill match, you can click the score to see the exact reasoning. Transparency is the only cure for hallucination.
 
 ---
 
