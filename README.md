@@ -41,16 +41,39 @@ Standard job searching is **Pull-based**: You go to LinkedIn, type keywords, and
     *   **Perplexity API:** [Get Key](https://www.perplexity.ai/settings/api) (For reasoning & writing)
     *   **Serper API:** [Get Key](https://serper.dev/) (For Google Search access)
 
-### Installation
-1.  **Clone/Download** this repository.
-2.  Open your terminal in the folder.
-3.  Run:
-    ```bash
-    npm install
-    npm run dev
-    ```
-4.  Open `http://localhost:5173` in your browser.
+## 🛠️ Installation (Step-by-Step)
 
+### Step 1: Download the App
+1.  Scroll to the top of this GitHub page.
+2.  Click the green **<> Code** button.
+3.  Click **Download ZIP**.
+4.  Find the ZIP file in your Downloads folder and **Unzip/Extract** it.
+
+### Step 2: Open the Terminal
+*   **On Mac:** Press `Command + Space`, type `Terminal`, and hit Enter.
+*   **On Windows:** Press the `Windows Key`, type `PowerShell`, and hit Enter.
+
+### Step 3: Go to the Folder
+1.  In the terminal, type `cd ` (type **cd** followed by a **space**).
+2.  **Drag and drop** the unzipped folder from your desktop into the terminal window.
+3.  It should look like: `cd /Users/yourname/Downloads/job-radar-main`.
+4.  Press **Enter**.
+
+### Step 4: Install Dependencies (The "Scary" Part)
+1.  Type `npm install` and press **Enter**.
+2.  **What you will see:**
+    *   You will see text scrolling and progress bars.
+    *   ⚠️ **IGNORE YELLOW WARNINGS:** You might see text like `npm warn deprecated` or `found 3 vulnerabilities`. **This is normal.** It just means some sub-tools are older. As long as you see the line **"added X packages"** at the end, it worked.
+    *   *Do not run `npm audit fix` unless you know what you are doing.*
+
+### Step 5: Launch the App 🚀
+1.  Type `npm run dev` and press **Enter**.
+2.  You should see green text saying:
+    ```
+    ➜  Local:   http://localhost:5173/
+    ```
+3.  **Hold Command (Mac) or Ctrl (Windows)** and click that link.
+4.  The app will open in your browser!
 ---
 
 ## 🎮 Workflow Guide
