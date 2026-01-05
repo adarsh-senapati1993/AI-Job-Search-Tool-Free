@@ -1,12 +1,13 @@
 export const STORAGE_KEYS = {
-  PERPLEXITY_KEY: 'jobradar_perplexity_key',
-  SERPER_KEY: 'jobradar_serper_key',
-  USER_CONFIG: 'jobradar_user_config',
-  PROFILE_DRAFT: 'jobradar_profile_draft',
-  RAW_RESUME: 'jobradar_raw_resume',
-  LATEST_RUN: 'jobradar_latest_run',
-  SEEN_JOBS: 'jobradar_seen_jobs',
-  KEY_BACKUP: 'jobradar_key_backup',
+    PERPLEXITY_KEY: 'jobradar_perplexity_key',
+    SERPER_KEY: 'jobradar_serper_key',
+    USER_CONFIG: 'jobradar_user_config',
+    PROFILE_DRAFT: 'jobradar_profile_draft',
+    RAW_RESUME: 'jobradar_raw_resume',
+    LATEST_RUN: 'jobradar_latest_run',
+    SEEN_JOBS: 'jobradar_seen_jobs',
+    KEY_BACKUP: 'jobradar_key_backup',
+    CUSTOM_ATS_DOMAINS: 'jobradar_custom_ats', // NEW: User-configurable ATS domains
 };
 
 export const saveKey = (key: string, value: string) => { if (typeof window !== 'undefined') localStorage.setItem(key, value); };
@@ -24,8 +25,8 @@ export const clearLatestRun = () => { if (typeof window !== 'undefined') localSt
 export const backupKeys = () => { if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEYS.KEY_BACKUP, JSON.stringify({ perplexity: getKey(STORAGE_KEYS.PERPLEXITY_KEY), serper: getKey(STORAGE_KEYS.SERPER_KEY) })); };
 export const getBackedUpKeys = () => { if (typeof window !== 'undefined') { const d = localStorage.getItem(STORAGE_KEYS.KEY_BACKUP); return d ? JSON.parse(d) : null; } return null; };
 
-export const clearKeys = () => { 
-    if (typeof window !== 'undefined') { 
+export const clearKeys = () => {
+    if (typeof window !== 'undefined') {
         // We do NOT use localStorage.clear() anymore because it wipes the backup
         localStorage.removeItem(STORAGE_KEYS.PERPLEXITY_KEY);
         localStorage.removeItem(STORAGE_KEYS.SERPER_KEY);
@@ -34,7 +35,7 @@ export const clearKeys = () => {
         localStorage.removeItem(STORAGE_KEYS.RAW_RESUME);
         localStorage.removeItem(STORAGE_KEYS.LATEST_RUN);
         // We intentionally keep SEEN_JOBS and KEY_BACKUP
-    } 
+    }
 };
 
 export const hasRequiredKeys = (): boolean => !!getKey(STORAGE_KEYS.SERPER_KEY) && !!getKey(STORAGE_KEYS.PERPLEXITY_KEY);

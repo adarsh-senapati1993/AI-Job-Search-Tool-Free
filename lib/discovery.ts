@@ -1,23 +1,26 @@
-import { performSerperSearch } from './serper';
+import { performSerperSearch, performSerperJobsSearch } from './serper';
 import { getKey, STORAGE_KEYS } from './storage';
 
 export interface RawSignal {
-  id: string;
-  source: string;
-  url: string;
-  title: string;
-  snippet: string;
-  timestamp: string;
-  metadata?: {
-      query: string;
-      rank: number;
-  }
+    id: string;
+    source: string;
+    url: string;
+    title: string;
+    snippet: string;
+    timestamp: string;
+    company?: string; // NEW
+    salary?: string; // NEW
+    location?: string; // NEW
+    metadata?: {
+        query: string;
+        rank: number;
+    }
 }
 
 type LogCallback = (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
 
 // --- CONSTANTS FOR VISIBILITY & DENSITY ---
-export const GLOBAL_ATS_TARGETS = [
+export const DEFAULT_ATS_TARGETS = [
     'boards.greenhouse.io',
     'jobs.lever.co',
     'jobs.ashbyhq.com',
@@ -27,6 +30,37 @@ export const GLOBAL_ATS_TARGETS = [
     'breezy.hr',
     'careers.jobscore.com'
 ];
+
+// NEW: Aggregator domains to deprioritize in favor of direct ATS links
+export const AGGREGATOR_DOMAINS = [
+    'indeed.com',
+    'glassdoor.com',
+    'ziprecruiter.com',
+    'monster.com',
+    'simplyhired.com',
+    'careerbuilder.com',
+    'dice.com'
+];
+
+// NEW: Get ATS targets from storage (user-configurable) or use defaults
+export const getATSTargets = (): string[] => {
+    const customATS = getKey(STORAGE_KEYS.CUSTOM_ATS_DOMAINS);
+    if (customATS) {
+        try {
+            const parsed = JSON.parse(customATS);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                // Merge custom with defaults, deduplicate
+                return [...new Set([...DEFAULT_ATS_TARGETS, ...parsed])];
+            }
+        } catch (e) {
+            console.warn("Failed to parse custom ATS domains", e);
+        }
+    }
+    return DEFAULT_ATS_TARGETS;
+};
+
+// Legacy export for backward compatibility
+export const GLOBAL_ATS_TARGETS = DEFAULT_ATS_TARGETS;
 
 export const GLOBAL_NETWORKS = [
     'linkedin.com/jobs/view'
@@ -44,13 +78,13 @@ export const extractCompanyFromUrl = (url: string): string | null => {
             const parts = path.split('/').filter(p => p);
             if (parts.length > 0) return capitalize(parts[0]);
         }
-        
+
         // 2. Subdomains (careers.company.com)
         if (host.startsWith('careers.') || host.startsWith('jobs.') || host.startsWith('join.')) {
             const parts = host.split('.');
-            if (parts.length >= 3) return capitalize(parts[1]); 
+            if (parts.length >= 3) return capitalize(parts[1]);
         }
-        
+
         // 3. Workday
         if (host.includes('myworkdayjobs.com')) {
             const company = host.split('.')[0];
@@ -68,17 +102,25 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /**
  * Assigns a quality score to the source URL.
  * Higher is better. Used to resolve duplicates.
+ * IMPROVED: Now deprioritizes aggregator domains.
  */
 const getSourceAuthority = (url: string, snippet: string, regionalBoards: string[] = []): number => {
     const u = url.toLowerCase();
     let score = 1;
+
+    // Check if this is an aggregator (lowest priority)
+    if (AGGREGATOR_DOMAINS.some(agg => u.includes(agg))) {
+        return 0.5; // Aggregators get lowest score
+    }
+
     // Rank 3: Direct ATS (Source of Truth - Highest Priority)
-    if (GLOBAL_ATS_TARGETS.some(ats => u.includes(ats.replace('boards.', '').replace('jobs.', '')))) score = 10;
+    const atsTargets = getATSTargets();
+    if (atsTargets.some(ats => u.includes(ats.replace('boards.', '').replace('jobs.', '')))) score = 10;
     // Rank 2: High Quality Platforms (Deep Links)
     else if (u.includes('linkedin.com') || u.includes('wellfound.com') || u.includes('ycombinator.com')) score = 5;
     // Rank 2.5: Dynamic Regional Portals (Identified by AI)
     else if (regionalBoards.some(board => u.includes(board))) score = 4;
-    
+
     // Recency Bonus (0.1 per day fresh)
     const daysOldMatch = snippet.match(/(\d+)\s+day/);
     if (daysOldMatch) {
@@ -110,16 +152,16 @@ const extractJobId = (url: string): string | null => {
 
         // Lever: /company/id
         if (u.hostname.includes('lever.co')) {
-             const parts = path.split('/').filter(p => p);
-             return parts.length >= 2 ? parts[parts.length - 1] : null;
+            const parts = path.split('/').filter(p => p);
+            return parts.length >= 2 ? parts[parts.length - 1] : null;
         }
 
         // Ashby: /company/id
         if (u.hostname.includes('ashbyhq.com')) {
-             const parts = path.split('/').filter(p => p);
-             return parts.length >= 2 ? parts[parts.length - 1] : null;
+            const parts = path.split('/').filter(p => p);
+            return parts.length >= 2 ? parts[parts.length - 1] : null;
         }
-        
+
         // LinkedIn: /jobs/view/ID or ?currentJobId=ID
         if (u.hostname.includes('linkedin.com')) {
             if (path.includes('/jobs/view/')) {
@@ -148,25 +190,32 @@ const extractTeamContext = (text: string): string => {
 
 /**
  * Creates a semantic fingerprint.
- * IMPROVED V2: Includes Team Context & Snippet Hash to reduce collisions.
+ * IMPROVED V3: Includes Team Context & Snippet Hash (150 chars) to reduce collisions.
+ * V4: Uses structured company/location if available from Jobs API.
  */
 const generateFingerprint = (item: RawSignal): string => {
-    let company = extractCompanyFromUrl(item.url);
+    // 1. Prefer Clean Structure if available (Jobs API)
+    let company = item.company;
+
+    // 2. Fallback to extracting from URL or Title
     if (!company) {
-        try { 
-            // Attempt to extract from Title (e.g., "Product Manager at Stripe")
-            const atSplit = item.title.toLowerCase().split(' at ');
-            if (atSplit.length > 1) {
-                company = atSplit[atSplit.length - 1];
-            } else {
-                const hostname = new URL(item.url).hostname;
-                company = hostname.replace('www.', '').split('.')[0]; 
+        company = extractCompanyFromUrl(item.url);
+        if (!company) {
+            try {
+                // Attempt to extract from Title (e.g., "Product Manager at Stripe")
+                const atSplit = item.title.toLowerCase().split(' at ');
+                if (atSplit.length > 1) {
+                    company = atSplit[atSplit.length - 1];
+                } else {
+                    const hostname = new URL(item.url).hostname;
+                    company = hostname.replace('www.', '').split('.')[0];
+                }
+            } catch (e) {
+                company = 'unknown';
             }
-        } catch(e) { 
-            company = 'unknown'; 
         }
     }
-    
+
     // Normalize Company Name (e.g. "Stripe Inc" -> "stripe")
     const cleanCompany = normalizeString(company || 'unknown');
 
@@ -177,10 +226,10 @@ const generateFingerprint = (item: RawSignal): string => {
         return `ID:${cleanCompany}:${jobId}`;
     }
 
-    // 2. Fuzzy Matching V2 (The "Collision" Fix)
+    // 2. Fuzzy Matching V3 (Enhanced with 150-char snippet hash)
     // "Senior Product Manager" -> "seniorproductmanager"
     let title = normalizeString(item.title);
-    
+
     // Remove "at Company" from title for hash if present
     if (company && title.includes(cleanCompany)) {
         title = title.replace(cleanCompany, '');
@@ -188,12 +237,12 @@ const generateFingerprint = (item: RawSignal): string => {
 
     // Extract Context (Team/Dept) to differentiate "Stripe PM (Payments)" from "Stripe PM (Growth)"
     const team = extractTeamContext(item.title) || extractTeamContext(item.snippet);
-    
-    // Include snippet start to handle cases where titles are identical but descriptions differ
-    const snippetHash = item.snippet.slice(0, 50).replace(/[^a-zA-Z0-9]/g, '');
+
+    // IMPROVED: Include first 150 chars of snippet for better differentiation
+    const snippetHash = item.snippet.slice(0, 150).replace(/[^a-zA-Z0-9]/g, '');
 
     // Hash the combination
-    return `FUZZY_V2:${cleanCompany}:${title.slice(0, 15)}:${team}:${snippetHash}`;
+    return `FUZZY_V3:${cleanCompany}:${title.slice(0, 15)}:${team}:${snippetHash}`;
 };
 
 // --- STRATEGY: URL VALIDATOR ---
@@ -203,11 +252,11 @@ const isHighQualityJobLink = (url: string): boolean => {
         const path = u.pathname.toLowerCase();
         const search = u.search.toLowerCase();
         const hostname = u.hostname.toLowerCase();
-        
+
         // REJECT GENERIC PAGES
         if (path === '/' || path === '/jobs' || path === '/jobs/' || path === '/careers') return false;
         if (path.includes('/search') && !hostname.includes('linkedin.com')) return false; // LinkedIn search links can be valid specific queries
-        if (path.includes('/tags/') || path.includes('/category/') || path.includes('/archive/')) return false; 
+        if (path.includes('/tags/') || path.includes('/category/') || path.includes('/archive/')) return false;
         if (path.includes('/blog/') || path.includes('/news/')) return false;
 
         // TARGETED: LinkedIn
@@ -216,7 +265,7 @@ const isHighQualityJobLink = (url: string): boolean => {
             if (path.includes('/jobs/search') && search.includes('currentjobid=')) return true;
             return false;
         }
-        
+
         return true;
     } catch (e) {
         return false;
@@ -225,23 +274,55 @@ const isHighQualityJobLink = (url: string): boolean => {
 
 /**
  * CLIENT-SIDE "BOUNCER" (Layer 2)
- * PERMISSIVE MODE: Blocks only obvious nonsense. Leaves nuanced decisions to the AI Scorer.
+ * IMPROVED: More aggressive pre-filtering to reduce AI scoring costs.
+ * Uses domain-based stop words to reject obviously unrelated roles.
  */
 const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]): boolean => {
     const t = title.toLowerCase();
-    
+
     // 1. Safe Pass: Generic Titles
     if (t.includes('careers') || t.includes('jobs at') || t.includes('join our team') || t.includes('openings')) {
         return true;
     }
 
-    // 2. Obvious Stop Words Check
-    // We only block these if the user is NOT explicitly looking for them.
-    const stopWords = ['account executive', 'sales representative', 'customer support', 'recruiter', 'hr manager', 'legal counsel'];
-    const userIsLookingForStopWord = targetRoles.some(r => stopWords.some(sw => r.toLowerCase().includes(sw)));
-    
+    // 2. Comprehensive Stop Words by Domain
+    // These are roles that are almost never relevant to tech/product job seekers
+    const universalStopWords = [
+        // Sales (unless explicitly wanted)
+        'account executive', 'sales representative', 'sales manager', 'business development rep', 'bdr', 'sdr',
+        // Customer-facing support
+        'customer support', 'customer service', 'customer success manager', 'support specialist',
+        // HR/Admin
+        'recruiter', 'hr manager', 'human resources', 'office manager', 'administrative assistant', 'receptionist',
+        // Legal/Finance (unless explicitly wanted)
+        'legal counsel', 'paralegal', 'accountant', 'auditor', 'tax specialist',
+        // Healthcare (unless explicitly wanted)
+        'nurse', 'physician', 'medical assistant', 'pharmacist', 'dental',
+        // Retail/Food
+        'cashier', 'barista', 'server', 'retail associate', 'store manager', 'shift supervisor',
+        // Construction/Manual
+        'electrician', 'plumber', 'mechanic', 'driver', 'warehouse associate', 'forklift operator',
+        // Education (unless explicitly wanted)
+        'teacher', 'tutor', 'professor', 'teaching assistant',
+    ];
+
+    // Domain-specific allowed roles (these override stop words)
+    const techRoles = ['engineer', 'developer', 'designer', 'product', 'data', 'analyst', 'manager', 'architect', 'devops', 'sre', 'qa', 'scientist'];
+
+    // Check if user is looking for something in stop words
+    const userIsLookingForStopWord = targetRoles.some(r =>
+        universalStopWords.some(sw => r.toLowerCase().includes(sw.split(' ')[0]))
+    );
+
+    // Only filter if user is NOT looking for these roles
     if (!userIsLookingForStopWord) {
-        if (stopWords.some(sw => t.includes(sw))) return false;
+        // Check if title contains stop words AND doesn't contain tech role keywords
+        const hasStopWord = universalStopWords.some(sw => t.includes(sw));
+        const hasTechKeyword = techRoles.some(tk => t.includes(tk));
+
+        if (hasStopWord && !hasTechKeyword) {
+            return false;
+        }
     }
 
     // 3. Minimum Viable Relevance (Fuzzy Token Overlap)
@@ -261,8 +342,10 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
     if (significantTokens.size === 0) return true;
 
     const titleWords = t.split(/[\s/-]/);
-    const hasOverlap = titleWords.some(word => significantTokens.has(word));
-    
+    const snippetWords = snippet.toLowerCase().split(/[\s/-]/);
+    const allWords = [...titleWords, ...snippetWords];
+    const hasOverlap = allWords.some(word => significantTokens.has(word));
+
     return hasOverlap;
 }
 
@@ -276,7 +359,7 @@ const normalizeLocationInput = (input: string): string => {
 
     // Split CamelCase (e.g. "HongKong" -> "Hong Kong") to ensure basic readability
     const spaced = raw.replace(/([a-z])([A-Z])/g, '$1 $2');
-    
+
     // We quote it to be safe, but the heavy lifting is done by the expanded list.
     return `"${spaced}"`;
 }
@@ -296,7 +379,7 @@ export const buildSearchQueries = (config: any) => {
     const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog'];
     const userNegatives = (config.avoid_keywords || []).map((k: string) => `-"${k}"`);
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
-    
+
     // SMART LOCATION INJECTION
     // Priority: Use AI-Expanded Locations if available. Fallback to basic normalization.
     let locationsQuery = '';
@@ -308,11 +391,11 @@ export const buildSearchQueries = (config: any) => {
         // Legacy fallback
         locationsQuery = `(${config.locations.map(normalizeLocationInput).join(' OR ')})`;
     }
-      
+
     const industriesQuery = config.industries && config.industries.length > 0
-      ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
-      : '';
-      
+        ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
+        : '';
+
     const queries: { name: string, q: string }[] = [];
     const ROLE_CHUNK_SIZE = 4;
     const roles = config.target_roles;
@@ -321,40 +404,40 @@ export const buildSearchQueries = (config: any) => {
 
     for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
         const chunk = roles.slice(i, i + ROLE_CHUNK_SIZE);
-        
+
         // STRICT MODE: Use Quotes for ATS/LinkedIn to avoid noise (e.g. "Product" ... "Manager")
         const roleQueryStrict = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
-        
+
         // LOOSE MODE: No Quotes. Essential for Regional/Web to allow Google to handle translations/synonyms.
         const roleQueryLoose = `(${chunk.map((r: string) => r).join(' OR ')})`;
-        
-        const suffix = roles.length > 4 ? ` (Batch ${Math.floor(i/ROLE_CHUNK_SIZE) + 1})` : '';
+
+        const suffix = roles.length > 4 ? ` (Batch ${Math.floor(i / ROLE_CHUNK_SIZE) + 1})` : '';
 
         // 1. ATS Direct (Strict)
-        queries.push({ 
-            name: `ATS Direct${suffix}`, 
-            q: `${atsQueryPart} ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+        queries.push({
+            name: `ATS Direct${suffix}`,
+            q: `${atsQueryPart} ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}`
         });
-        
+
         // 2. Deep LinkedIn (Strict)
-        queries.push({ 
-            name: `LinkedIn${suffix}`, 
-            q: `site:linkedin.com/jobs/view ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+        queries.push({
+            name: `LinkedIn${suffix}`,
+            q: `site:linkedin.com/jobs/view ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}`
         });
-        
+
         // 3. Dynamic Regional Portals (Loose - For Local Language Support)
         if (config.regional_boards && config.regional_boards.length > 0) {
             const siteOperators = config.regional_boards.map((domain: string) => `site:${domain}`).join(' OR ');
-            queries.push({ 
-                name: `Regional Portals${suffix}`, 
-                q: `(${siteOperators}) ${roleQueryLoose} ${locationsQuery} ${negativeFilters} after:${dateStr}` 
+            queries.push({
+                name: `Regional Portals${suffix}`,
+                q: `(${siteOperators}) ${roleQueryLoose} ${locationsQuery} ${negativeFilters} after:${dateStr}`
             });
         }
-        
+
         // 4. Broad Web (Loose - For Synonym Matching)
-        queries.push({ 
-            name: `Web Discovery${suffix}`, 
-            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQueryLoose} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}` 
+        queries.push({
+            name: `Web Discovery${suffix}`,
+            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQueryLoose} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}`
         });
     }
 
@@ -362,86 +445,134 @@ export const buildSearchQueries = (config: any) => {
 };
 
 export const searchForSignals = async (config: any, onLog: LogCallback, signal?: AbortSignal): Promise<RawSignal[]> => {
-  const serperKey = getKey(STORAGE_KEYS.SERPER_KEY);
-  if (!serperKey) throw new Error("Serper Key missing.");
+    const serperKey = getKey(STORAGE_KEYS.SERPER_KEY);
+    if (!serperKey) throw new Error("Serper Key missing.");
 
-  const queries = buildSearchQueries(config);
-  const depthMode = config.search_depth || 'standard';
-  const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
+    const queries = buildSearchQueries(config);
+    const depthMode = config.search_depth || 'standard';
+    const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
 
-  onLog(`Configuration: Depth=${depthMode.toUpperCase()} (${pages} pages/cluster)`, 'info');
-  if (config.regional_boards?.length > 0) {
-      onLog(`Regional Satellites Active: ${config.regional_boards.join(', ')}`, 'success');
-  }
-  
-  onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
+    onLog(`Configuration: Depth=${depthMode.toUpperCase()} (${pages} pages/cluster)`, 'info');
+    if (config.regional_boards?.length > 0) {
+        onLog(`Regional Satellites Active: ${config.regional_boards.join(', ')}`, 'success');
+    }
 
-  const tasks: { q: any, page: number }[] = [];
-  queries.forEach(q => {
-      for (let i = 0; i < pages; i++) tasks.push({ q, page: i });
-  });
+    onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
 
-  const BATCH_SIZE = 8; 
-  let rawResults: RawSignal[] = [];
+    // 1. STANDARD SEARCH TASKS
+    const tasks: { q: any, page: number }[] = [];
+    queries.forEach(q => {
+        for (let i = 0; i < pages; i++) tasks.push({ q, page: i });
+    });
 
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-      if (signal?.aborted) break;
-      const batch = tasks.slice(i, i + BATCH_SIZE);
-      
-      const batchPromises = batch.map(task => {
-          return performSerperSearch(serperKey, task.q.q, task.page * 20)
-              .then(res => res.map((r: any, idx: number) => ({
-                 id: `sig_${Date.now()}_${i}_${idx}`,
-                 source: task.q.name,
-                 url: r.link,
-                 title: r.title,
-                 snippet: r.snippet,
-                 timestamp: r.date || new Date().toISOString(),
-                 metadata: { query: task.q.q, rank: idx }
-              })))
-              .catch(() => []);
-      });
+    // 2. JOBS API TASKS (NEW: High Signal)
+    // Runs once for each Role x Location combination
+    // Query format: "${role} jobs in ${location}"
+    const jobsTasks: string[] = [];
+    const locs = config.locations.length > 0 ? config.locations : [""]; // If no location, global?
+    config.target_roles.forEach((role: string) => {
+        locs.forEach((loc: string) => {
+            jobsTasks.push(`${role} jobs ${loc ? `in ${loc}` : ''}`);
+        });
+    });
 
-      const batchResults = await Promise.all(batchPromises);
-      batchResults.forEach(res => rawResults.push(...res));
-      await new Promise(r => setTimeout(r, 200)); 
-  }
+    const BATCH_SIZE = 8;
+    let rawResults: RawSignal[] = [];
 
-  // --- FILTERING & DEDUPLICATION STRATEGY ---
-  
-  const fingerprintMap = new Map<string, RawSignal>();
-  let duplicates = 0;
-  let rejectedByGuard = 0;
+    // EXECUTE STANDARD SEARCH
+    for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+        if (signal?.aborted) break;
+        const batch = tasks.slice(i, i + BATCH_SIZE);
 
-  rawResults.forEach(item => {
-      // 1. Basic URL Check
-      if (!isHighQualityJobLink(item.url)) return;
+        const batchPromises = batch.map(task => {
+            return performSerperSearch(serperKey, task.q.q, task.page * 20)
+                .then(res => res.map((r: any, idx: number) => ({
+                    id: `sig_${Date.now()}_${i}_${idx}`,
+                    source: task.q.name,
+                    url: r.link,
+                    title: r.title,
+                    snippet: r.snippet,
+                    timestamp: r.date || new Date().toISOString(),
+                    metadata: { query: task.q.q, rank: idx }
+                })))
+                .catch(() => []);
+        });
 
-      // 2. THE BOUNCER (Layer 2)
-      if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
-          rejectedByGuard++;
-          return;
-      }
-      
-      const fingerprint = generateFingerprint(item);
-      const existing = fingerprintMap.get(fingerprint);
-      
-      const scoreNew = getSourceAuthority(item.url, item.snippet, config.regional_boards);
-      
-      if (existing) {
-          const scoreOld = getSourceAuthority(existing.url, existing.snippet, config.regional_boards);
-          if (scoreNew > scoreOld) {
-              fingerprintMap.set(fingerprint, item);
-          }
-          duplicates++;
-      } else {
-          fingerprintMap.set(fingerprint, item);
-      }
-  });
+        const batchResults = await Promise.all(batchPromises);
+        batchResults.forEach(res => rawResults.push(...res));
+        await new Promise(r => setTimeout(r, 200));
+    }
 
-  const unique = Array.from(fingerprintMap.values());
-  onLog(`Analysis: Found ${rawResults.length} raw signals.`, 'info');
-  onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} obvious mismatches.`, 'success');
-  
-  return unique;
+    // EXECUTE JOBS API SEARCH (Parallel)
+    // We only run this if we haven't aborted
+    if (!signal?.aborted && jobsTasks.length > 0) {
+        onLog(`Checking Google Jobs API for ${jobsTasks.length} targeted queries...`, 'info');
+
+        for (let i = 0; i < jobsTasks.length; i += BATCH_SIZE) {
+            if (signal?.aborted) break;
+            const batch = jobsTasks.slice(i, i + BATCH_SIZE);
+            const batchPromises = batch.map(query => {
+                return performSerperJobsSearch(serperKey, query)
+                    .then(res => res.map((r: any, idx: number) => ({
+                        id: `job_${Date.now()}_${i}_${idx}`,
+                        source: 'Google Jobs API',
+                        url: r.link,
+                        title: r.title,
+                        snippet: r.snippet, // This is usually full description in Jobs API
+                        timestamp: r.date || new Date().toISOString(),
+                        company: r.company,
+                        location: r.location,
+                        salary: r.salary,
+                        metadata: { query: query, rank: idx }
+                    })))
+                    .catch(() => []);
+            });
+            const batchResults = await Promise.all(batchPromises);
+            batchResults.forEach(res => rawResults.push(...res));
+        }
+    }
+
+    // --- FILTERING & DEDUPLICATION STRATEGY ---
+
+    const fingerprintMap = new Map<string, RawSignal>();
+    let duplicates = 0;
+    let rejectedByGuard = 0;
+
+    rawResults.forEach(item => {
+        // 1. Basic URL Check
+        if (!isHighQualityJobLink(item.url)) return;
+
+        // 2. THE BOUNCER (Layer 2)
+        if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
+            rejectedByGuard++;
+            return;
+        }
+
+        const fingerprint = generateFingerprint(item);
+        const existing = fingerprintMap.get(fingerprint);
+
+        const scoreNew = getSourceAuthority(item.url, item.snippet, config.regional_boards);
+
+        if (existing) {
+            const scoreOld = getSourceAuthority(existing.url, existing.snippet, config.regional_boards);
+            // Bias towards Jobs API if existing wasn't
+            const isJobsApiNew = item.source === 'Google Jobs API';
+            const isJobsApiOld = existing.source === 'Google Jobs API';
+
+            if (isJobsApiNew && !isJobsApiOld) {
+                fingerprintMap.set(fingerprint, item);
+            } else if (scoreNew > scoreOld && !isJobsApiOld) {
+                fingerprintMap.set(fingerprint, item);
+            }
+            duplicates++;
+        } else {
+            fingerprintMap.set(fingerprint, item);
+        }
+    });
+
+    const unique = Array.from(fingerprintMap.values());
+    onLog(`Analysis: Found ${rawResults.length} raw signals.`, 'info');
+    onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} obvious mismatches.`, 'success');
+
+    return unique;
 };
