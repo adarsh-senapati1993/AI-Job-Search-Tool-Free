@@ -35,7 +35,7 @@ Standard job searching is **Pull-based**: You go to LinkedIn, type keywords, and
 
 ## ⚡ Quick Start Guide
 
-### Prerequisites
+### Step 0: Prerequisites
 1.  **Node.js (LTS Version):** [Download Here](https://nodejs.org/)
 2.  **API Keys** (The "Fuel" for the AI - cost is <$5):
     *   **Perplexity API:** [Get Key](https://www.perplexity.ai/settings/api) (For reasoning & writing)
