@@ -6,7 +6,7 @@ export interface CardProps {
 
 export const Card = ({ children, className = "" }: React.PropsWithChildren<CardProps>) => {
   return (
-    <div className={`bg-slate-800 border border-slate-700 rounded-xl shadow-xl p-6 ${className}`}>
+    <div className={`apple-card p-6 ${className}`}>
       {children}
     </div>
   );

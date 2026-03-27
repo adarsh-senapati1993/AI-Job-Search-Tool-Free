@@ -1,4 +1,8 @@
+import { logErrorToStorage } from './api-utils';
+
 export const verifySerperKey = async (apiKey: string): Promise<{ isValid: boolean; error?: string }> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
         const response = await fetch('https://google.serper.dev/search', {
             method: 'POST',
@@ -6,12 +10,15 @@ export const verifySerperKey = async (apiKey: string): Promise<{ isValid: boolea
                 'X-API-KEY': apiKey,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ q: "test connection" })
+            body: JSON.stringify({ q: "test connection" }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) return { isValid: false, error: "Invalid Serper Key" };
         return { isValid: true };
     } catch (error: any) {
+        clearTimeout(timeoutId);
         return { isValid: false, error: error.message };
     }
 };
@@ -28,50 +35,70 @@ export interface SerperResult {
 }
 
 export const checkSerperQuota = async (apiKey: string, estimatedQueries: number): Promise<{ ok: boolean; remaining: number; msg?: string }> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
         // Lightweight check
         const response = await fetch('https://google.serper.dev/search', {
             method: 'POST',
             headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ q: "test", num: 1 })
+            body: JSON.stringify({ q: "test", num: 1 }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (response.status === 403 || response.status === 402) {
-            return { ok: false, remaining: 0, msg: "Quota Exceeded or Invalid Key" };
+            const errorText = await response.text();
+            return { ok: false, remaining: 0, msg: `Serper Rejected (${response.status}): ${errorText}` };
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            return { ok: false, remaining: 0, msg: `Serper Error (${response.status}): ${errorText}` };
         }
 
         return { ok: true, remaining: 9999 };
-    } catch (e) {
-        return { ok: false, remaining: 0, msg: "Connection Failed" };
+    } catch (e: any) {
+        clearTimeout(timeoutId);
+        return { ok: false, remaining: 0, msg: `Connection Failed: ${e.message}` };
     }
 };
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const performSerperSearch = async (apiKey: string, query: string, start: number = 0, retries = 3): Promise<SerperResult[]> => {
+export const performSerperSearch = async (apiKey: string, query: string, start: number = 0, tbs?: string, retries = 5): Promise<SerperResult[]> => {
     for (let attempt = 0; attempt < retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         try {
+            const payload: any = { q: query, num: 20, start: start };
+            if (tbs) payload.tbs = tbs;
+
             const response = await fetch('https://google.serper.dev/search', {
                 method: 'POST',
                 headers: {
                     'X-API-KEY': apiKey,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    q: query,
-                    num: 20,
-                    start: start
-                })
+                body: JSON.stringify(payload),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
-            if (response.status === 429) {
-                const delay = 1000 * Math.pow(2, attempt + 1);
-                console.warn(`Serper Rate Limit 429. Retrying in ${delay}ms...`);
+            if (response.status === 429 || response.status >= 500) {
+                const delay = 1000 * Math.pow(2, attempt);
+                console.warn(`Serper API ${response.status}. Retrying in ${delay}ms... (${retries - attempt - 1} left)`);
                 await wait(delay);
                 continue;
             }
 
-            if (!response.ok) throw new Error(`Serper API Error: ${response.status}`);
+            if (!response.ok) {
+                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                    logErrorToStorage(`Serper Fatal Error (${query})`, `Status: ${response.status}`);
+                    return [];
+                }
+                throw new Error(`Serper API Error: ${response.status}`);
+            }
             const data = await response.json();
 
             return (data.organic || []).map((item: any) => ({
@@ -82,18 +109,24 @@ export const performSerperSearch = async (apiKey: string, query: string, start: 
                 source: item.source
             }));
         } catch (e: any) {
+            clearTimeout(timeoutId);
             if (attempt === retries - 1) {
+                logErrorToStorage(`Serper Search Failed Final (${query})`, e);
                 console.error("Serper Search Failed Final", e);
                 return [];
             }
-            await wait(1000 * (attempt + 1));
+            const delay = 1000 * Math.pow(2, attempt);
+            console.warn(`Serper Network Error. Retrying in ${delay}ms...`, e.message);
+            await wait(delay);
         }
     }
     return [];
 };
 
-export const performSerperJobsSearch = async (apiKey: string, query: string, retries = 3): Promise<SerperResult[]> => {
+export const performSerperJobsSearch = async (apiKey: string, query: string, retries = 5): Promise<SerperResult[]> => {
     for (let attempt = 0; attempt < retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         try {
             const response = await fetch('https://google.serper.dev/jobs', {
                 method: 'POST',
@@ -104,17 +137,25 @@ export const performSerperJobsSearch = async (apiKey: string, query: string, ret
                 body: JSON.stringify({
                     q: query,
                     num: 20
-                })
+                }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
-            if (response.status === 429) {
-                const delay = 1000 * Math.pow(2, attempt + 1);
-                console.warn(`Serper Jobs Rate Limit 429. Retrying in ${delay}ms...`);
+            if (response.status === 429 || response.status >= 500) {
+                const delay = 1000 * Math.pow(2, attempt);
+                console.warn(`Serper Jobs API ${response.status}. Retrying in ${delay}ms... (${retries - attempt - 1} left)`);
                 await wait(delay);
                 continue;
             }
 
-            if (!response.ok) throw new Error(`Serper Jobs API Error: ${response.status}`);
+            if (!response.ok) {
+                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                    logErrorToStorage(`Serper Jobs Fatal Error (${query})`, `Status: ${response.status}`);
+                    return [];
+                }
+                throw new Error(`Serper Jobs API Error: ${response.status}`);
+            }
             const data = await response.json();
 
             return (data.jobs || []).map((item: any) => ({
@@ -128,12 +169,47 @@ export const performSerperJobsSearch = async (apiKey: string, query: string, ret
                 salary: item.salary
             }));
         } catch (e: any) {
+            clearTimeout(timeoutId);
             if (attempt === retries - 1) {
+                logErrorToStorage(`Serper Jobs Search Failed Final (${query})`, e);
                 console.error("Serper Jobs Search Failed", e);
                 return [];
             }
-            await wait(1000 * (attempt + 1));
+            const delay = 1000 * Math.pow(2, attempt);
+            console.warn(`Serper Jobs Network Error. Retrying in ${delay}ms...`, e.message);
+            await wait(delay);
         }
     }
     return [];
+};
+
+// Company News Enrichment
+export interface CompanyNewsSnippet {
+    headline: string;
+    url: string;
+    date: string;
+}
+
+export const fetchCompanyNews = async (
+    apiKey: string,
+    companyName: string
+): Promise<CompanyNewsSnippet | null> => {
+    try {
+        const query = `"${companyName}" latest news hiring 2025`;
+        const results = await performSerperSearch(apiKey, query, 0, undefined, 2);
+
+        if (results.length > 0) {
+            const first = results[0];
+            return {
+                headline: first.title,
+                url: first.link,
+                date: first.date || new Date().toISOString().split('T')[0]
+            };
+        }
+        return null;
+    } catch (e: any) {
+        logErrorToStorage(`fetchCompanyNews (${companyName})`, e);
+        console.warn(`Failed to fetch news for ${companyName}`, e);
+        return null;
+    }
 };

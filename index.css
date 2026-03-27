@@ -1,4 +1,65 @@
-/* 
-  Styles are currently handled via Tailwind CDN in index.html 
-  to support browser-based previews without a PostCSS build step.
-*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Apple HIG Inspired Styles */
+html {
+    transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+    @apply bg-[#F2F2F7] text-[#1D1D1F] transition-colors duration-300;
+}
+
+html.dark body {
+    @apply bg-[#000000] text-[#F5F5F7];
+}
+
+/* Base custom classes for Apple UI feeling */
+.apple-glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/20 shadow-sm;
+}
+
+.dark .apple-glass {
+    @apply bg-[#1C1C1E]/70 backdrop-blur-xl border border-white/10 shadow-none;
+}
+
+.apple-card {
+    @apply bg-white border-none rounded-[32px] transition-all duration-300;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04), 0 10px 30px rgba(0,0,0,0.02);
+    border: 0.5px solid rgba(209, 209, 214, 0.5);
+}
+
+.dark .apple-card {
+    @apply bg-[#1C1C1E] border-none shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-0 text-white rounded-3xl transition-all duration-300;
+}
+
+.premium-panel {
+    @apply bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03),0_8px_40px_rgba(0,0,0,0.02)] ring-1 ring-black/[0.03] rounded-2xl transition-all duration-300;
+}
+
+.dark .premium-panel {
+    @apply bg-slate-800/50 shadow-none ring-1 ring-slate-700 rounded-2xl transition-all duration-300;
+}
+
+/* Primary Action Button - Apple V2 */
+.btn-primary {
+    @apply bg-[#0071E3] hover:bg-[#0077ED] text-white font-bold rounded-full transition-all active:scale-[0.98] border-t border-white/20;
+    background: linear-gradient(180deg, #0077ED 0%, #0071E3 100%);
+    box-shadow: 0 4px 14px rgba(0, 113, 227, 0.3);
+}
+
+/* Print styles for Interview Prep */
+@media print {
+    body {
+        background: white !important;
+        color: black !important;
+    }
+    .fixed {
+        position: static !important;
+        background: white !important;
+    }
+    button, .no-print {
+        display: none !important;
+    }
+}

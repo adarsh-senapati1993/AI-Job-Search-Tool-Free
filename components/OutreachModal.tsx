@@ -24,6 +24,9 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
   const [showDrafts, setShowDrafts] = useState(false);
   const [activeTab, setActiveTab] = useState<'linkedin' | 'email' | 'referral'>('linkedin');
   const [referralDraft, setReferralDraft] = useState('');
+  const [linkedinDraft, setLinkedinDraft] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
 
   const handleFindHM = async () => {
     if (!lead.company_name || !lead.role_title) return;
@@ -54,7 +57,6 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
     setLoading(true);
     setError(null);
     try {
-      const apiKey = getKey(STORAGE_KEYS.PERPLEXITY_KEY) || "";
       const config = getConfig();
       if (!config) throw new Error("Configuration missing");
 
@@ -67,7 +69,7 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
       // Parallel generation
       // draftReferralMessage signature: (userConfig: CandidateProfile, lead: any, mutualConnectionName?: string)
       const [outreach, referral] = await Promise.all([
-        generateOutreachDrafts(apiKey, config, lead, context),
+        generateOutreachDrafts(getKey(STORAGE_KEYS.PERPLEXITY_KEY) || getKey(STORAGE_KEYS.GEMINI_KEY) || "", config, lead, context),
         draftReferralMessage(config, lead)
       ]);
 
@@ -78,7 +80,9 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
       // Let's combine them or just show short?
       // Referral tab has "Referral Ask" textarea.
       setReferralDraft(`SUBJECT: Referral for ${lead.role_title}\n\n${referral.long_message}\n\n---\n\nCONNECTION REQUEST:\n${referral.short_message}`);
-
+      setLinkedinDraft(outreach.linkedin_dm);
+      setEmailSubject(outreach.email_subject);
+      setEmailBody(outreach.email_body);
       setShowDrafts(true);
     } catch (err: any) {
       console.error("Outreach Generation Error:", err);
@@ -102,37 +106,37 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
 
   return (
     <div
-      className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 apple-glass flex items-center justify-center z-50 p-4 animate-in fade-in duration-300"
       onClick={handleBackdropClick}
     >
       <div className="max-w-2xl w-full">
-        <Card className="bg-slate-900 border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <Card className="bg-white dark:bg-[#1C1C1E] border border-slate-200 dark:border-slate-800 shadow-[0_20px_60px_rgb(0,0,0,0.15)] rounded-[32px] overflow-hidden flex flex-col max-h-[90vh]">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6 shrink-0">
+          <div className="flex justify-between items-start mb-6 shrink-0 pt-2 px-2">
             <div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <h2 className="text-2xl tracking-tight font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>✍️</span> Outreach Copilot
               </h2>
-              <p className="text-slate-400 text-sm mt-1">
-                Target: <span className="text-indigo-400 font-semibold">{lead.role_title}</span> at <span className="text-white">{lead.company_name}</span>
+              <p className="text-slate-500 font-medium text-sm mt-1">
+                Target: <span className="text-[#0071E3] font-bold">{lead.role_title}</span> at <span className="text-slate-700 dark:text-slate-300 font-bold">{lead.company_name}</span>
               </p>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-white">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors p-2 bg-slate-100 dark:bg-slate-800 rounded-full">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
 
           {!showDrafts ? (
             /* INPUT STEP */
-            <div className="space-y-6 overflow-y-auto px-1">
-              <div className="bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-lg">
-                <p className="text-sm text-indigo-200">
+            <div className="space-y-6 overflow-y-auto px-2 pb-2">
+              <div className="bg-[#5856D6]/10 border border-[#5856D6]/20 p-4 rounded-2xl">
+                <p className="text-sm font-medium text-[#5856D6] dark:text-[#5856D6] leading-relaxed">
                   <strong>Strategy Tip:</strong> Provide context about the Hiring Manager to make the pitch authentic.
                   If you don't know, leave it blank, and we'll write a generic "Hiring Team" pitch.
                 </p>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <Input
                     label="Hiring Manager Name (Optional)"
@@ -141,7 +145,7 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
                     onChange={(e) => setHmName(e.target.value)}
                   />
                   <div className="flex items-end">
-                    <Button onClick={handleFindHM} variant="outline" className="h-10 text-xs w-full border-indigo-500/50 text-indigo-300 hover:bg-indigo-900/20" title="Use AI to find likely hiring manager">
+                    <Button onClick={handleFindHM} variant="secondary" className="h-10 text-xs w-full bg-[#5856D6]/10 text-[#5856D6] hover:bg-[#5856D6]/20 font-bold rounded-xl" title="Use AI to find likely hiring manager">
                       🔍 Auto-Find HM
                     </Button>
                   </div>
@@ -155,10 +159,10 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-300">Context / Intel (Optional)</label>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Context / Intel (Optional)</label>
                   <textarea
-                    className="w-full h-24 bg-slate-950 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full h-24 bg-slate-50 dark:bg-[#2C2C2E] border border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#0071E3] focus:ring-1 focus:ring-[#0071E3] text-sm font-medium transition-all resize-none shadow-sm"
                     placeholder="e.g. He recently posted about scaling their Payment API. He loves sailing. We both worked at Uber."
                     value={hmContext}
                     onChange={(e) => setHmContext(e.target.value)}
@@ -167,7 +171,7 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
               </div>
 
               {error && (
-                <div className="bg-red-500/10 border border-red-500/50 p-3 rounded text-red-300 text-sm">
+                <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/20 p-4 rounded-2xl text-[#FF3B30] text-sm font-bold">
                   {error}
                 </div>
               )}
@@ -175,71 +179,75 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
               <Button
                 onClick={generateDrafts}
                 isLoading={loading}
-                className="w-full h-12 text-lg bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-900/30"
+                className="w-full h-14 text-lg bg-[#0071E3] hover:bg-[#0077ED] text-white rounded-2xl shadow-[0_4px_14px_rgba(0,113,227,0.3)] font-bold active:scale-[0.98] transition-all"
               >
                 Generate Personalized Pitch 🚀
               </Button>
             </div>
           ) : (
             /* RESULTS STEP */
-            <div className="flex flex-col h-full overflow-hidden">
+            <div className="flex flex-col h-full overflow-hidden px-2 pb-2">
               {/* Tabs */}
-              <div className="flex border-b border-slate-700 mb-4 shrink-0">
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl mb-5 shrink-0">
                 <button
                   onClick={() => setActiveTab('linkedin')}
-                  className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'linkedin' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${activeTab === 'linkedin' ? 'bg-white dark:bg-slate-700 text-[#0071E3] shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                   LinkedIn DM
                 </button>
                 <button
                   onClick={() => setActiveTab('email')}
-                  className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'email' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${activeTab === 'email' ? 'bg-white dark:bg-slate-700 text-[#34C759] shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                   Cold Email
                 </button>
                 <button
                   onClick={() => setActiveTab('referral')}
-                  className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'referral' ? 'text-amber-400 border-b-2 border-amber-500' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 text-sm font-bold rounded-xl transition-all ${activeTab === 'referral' ? 'bg-white dark:bg-slate-700 text-[#FF9500] shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                   Referral Request
                 </button>
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto pr-2 space-y-4 min-h-0">
+              <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
                 {activeTab === 'linkedin' ? (
                   <div className="space-y-2 h-full">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Message Body</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Message Body</label>
                     <textarea
-                      className="w-full h-full min-h-[200px] bg-slate-950 border border-slate-700 rounded-lg p-4 text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-sans text-sm leading-relaxed"
-                      defaultValue={drafts?.linkedin_dm}
+                      className="w-full h-full min-h-[250px] bg-slate-50 dark:bg-[#2C2C2E] border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-slate-900 dark:text-white focus:outline-none focus:border-[#0071E3] focus:ring-1 focus:ring-[#0071E3] resize-none text-sm leading-relaxed shadow-sm font-medium"
+                      value={linkedinDraft}
+                      onChange={(e) => setLinkedinDraft(e.target.value)}
                     ></textarea>
                   </div>
                 ) : activeTab === 'referral' ? (
                   <div className="space-y-2 h-full">
-                    <div className="bg-amber-900/20 border border-amber-500/30 p-3 rounded mb-2 text-xs text-amber-200">
+                    <div className="bg-[#FF9500]/10 border border-[#FF9500]/20 p-4 rounded-2xl mb-3 text-sm text-[#FF9500] font-medium">
                       <strong>Tip:</strong> Send this to a 2nd degree connection (someone who knows the HM or works at the company).
                     </div>
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Referral Ask</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Referral Ask</label>
                     <textarea
-                      className="w-full h-full min-h-[200px] bg-slate-950 border border-slate-700 rounded-lg p-4 text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none font-sans text-sm leading-relaxed"
-                      defaultValue={referralDraft}
+                      className="w-full h-full min-h-[250px] bg-slate-50 dark:bg-[#2C2C2E] border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-slate-900 dark:text-white focus:outline-none focus:border-[#FF9500] focus:ring-1 focus:ring-[#FF9500] resize-none text-sm leading-relaxed shadow-sm font-medium"
+                      value={referralDraft}
+                      onChange={(e) => setReferralDraft(e.target.value)}
                     ></textarea>
                   </div>
                 ) : (
                   <div className="space-y-4 h-full">
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Subject Line</label>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Subject Line</label>
                       <input
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
-                        defaultValue={drafts?.email_subject}
+                        className="w-full bg-slate-50 dark:bg-[#2C2C2E] border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:border-[#34C759] focus:ring-1 focus:ring-[#34C759] text-sm font-bold shadow-sm"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
                       />
                     </div>
-                    <div className="space-y-1 flex-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Email Body</label>
+                    <div className="space-y-2 flex-1 pt-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Email Body</label>
                       <textarea
-                        className="w-full h-64 bg-slate-950 border border-slate-700 rounded-lg p-4 text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none font-sans text-sm leading-relaxed"
-                        defaultValue={drafts?.email_body}
+                        className="w-full h-[300px] bg-slate-50 dark:bg-[#2C2C2E] border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-slate-900 dark:text-white focus:outline-none focus:border-[#34C759] focus:ring-1 focus:ring-[#34C759] resize-none text-sm leading-relaxed shadow-sm font-medium"
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
                       ></textarea>
                     </div>
                   </div>
@@ -247,15 +255,15 @@ export const OutreachModal = ({ lead, onClose }: OutreachModalProps) => {
               </div>
 
               {/* Footer Actions */}
-              <div className="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between shrink-0">
-                <Button variant="ghost" onClick={() => setShowDrafts(false)} className="text-slate-400">
-                  ← Back to Inputs
+              <div className="mt-5 flex items-center justify-between shrink-0">
+                <Button variant="ghost" onClick={() => setShowDrafts(false)} className="text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full px-4 text-sm">
+                  ← Back
                 </Button>
-                <div className="flex gap-3">
-                  {copyStatus && <span className="text-emerald-400 text-sm font-medium animate-in fade-in py-2">{copyStatus}</span>}
+                <div className="flex items-center gap-3">
+                  {copyStatus && <span className="text-[#34C759] text-sm font-bold animate-in fade-in">{copyStatus}</span>}
                   <Button
-                    onClick={() => handleCopy(activeTab === 'linkedin' ? drafts!.linkedin_dm : activeTab === 'referral' ? referralDraft : `${drafts!.email_subject}\n\n${drafts!.email_body}`)}
-                    className={activeTab === 'linkedin' ? 'bg-indigo-600 hover:bg-indigo-500' : activeTab === 'referral' ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'}
+                    onClick={() => handleCopy(activeTab === 'linkedin' ? linkedinDraft : activeTab === 'referral' ? referralDraft : `${emailSubject}\n\n${emailBody}`)}
+                    className={`rounded-full px-6 font-bold shadow-sm ${activeTab === 'linkedin' ? 'bg-[#0071E3] hover:bg-[#0077ED]' : activeTab === 'referral' ? 'bg-[#FF9500] hover:bg-[#FF9E1A]' : 'bg-[#34C759] hover:bg-[#3CD062]'}`}
                   >
                     Copy to Clipboard
                   </Button>

@@ -1,5 +1,7 @@
-import { performSerperSearch, performSerperJobsSearch } from './serper';
+import { performSerperSearch, performSerperJobsSearch, fetchCompanyNews } from './serper';
 import { getKey, STORAGE_KEYS } from './storage';
+import pLimit from 'p-limit';
+import type { CompanyNewsSnippet } from './ai';
 
 export interface RawSignal {
     id: string;
@@ -7,10 +9,11 @@ export interface RawSignal {
     url: string;
     title: string;
     snippet: string;
+    clean_snippet?: string; // NEW: Sanitized version for LLM scoring
     timestamp: string;
-    company?: string; // NEW
-    salary?: string; // NEW
-    location?: string; // NEW
+    company?: string;
+    salary?: string;
+    location?: string;
     metadata?: {
         query: string;
         rank: number;
@@ -18,6 +21,14 @@ export interface RawSignal {
 }
 
 type LogCallback = (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
+
+export interface DiscoveryProgress {
+    found: number;
+    filtered: number;
+    currentQuery?: string;
+}
+
+type ProgressCallback = (p: DiscoveryProgress) => void;
 
 // --- CONSTANTS FOR VISIBILITY & DENSITY ---
 export const DEFAULT_ATS_TARGETS = [
@@ -180,6 +191,68 @@ const extractJobId = (url: string): string | null => {
     }
 }
 
+/**
+ * CLEAN SNIPPET (Heuristic DOM Stripping)
+ * Removes common boilerplate from Google Search snippets (cookie banners, header navs, etc.)
+ * This ensures the LLM's context window isn't polluted with "We use cookies" when evaluating culture fit.
+ */
+export const cleanSnippet = (snippet: string): string => {
+    let clean = snippet;
+    
+    // Common boilerplate phrases to strip out completely
+    const blocklists = [
+        /we use cookies.*?agree/gi,
+        /cookie policy/gi,
+        /manage preferences/gi,
+        /skip to main content/gi,
+        /return to careers/gi,
+        /view all openings/gi,
+        /apply for this job/gi,
+        /browse jobs/gi,
+        /privacy policy/gi,
+        /terms of service/gi
+    ];
+
+    blocklists.forEach(regex => {
+        clean = clean.replace(regex, '');
+    });
+
+    // Strip out generic menu bar nav items often captured in snippets
+    clean = clean.replace(/home\s*\|\s*about\s*\|\s*contact/gi, '');
+    clean = clean.replace(/careers\s*>\s*engineering/gi, '');
+
+    // Cleanup extra whitespace left behind by regex replacements
+    return clean.replace(/\s{2,}/g, ' ').trim();
+};
+
+/**
+ * CANONICAL COMPANY NORMALIZATION
+ * Removes common corporate suffixes so "Stripe Inc." matches "Stripe" across different platforms.
+ */
+export const normalizeCompanyName = (company: string): string => {
+    let norm = company.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '') // remove punctuation
+        .trim();
+        
+    // Standard corporate suffixes to strip
+    const suffixes = [
+        /\binc\b/i, 
+        /\bllc\b/i, 
+        /\bltd\b/i, 
+        /\bcorporation\b/i, 
+        /\bcorp\b/i, 
+        /\bcompany\b/i,
+        /\bglobal\b/i,
+        /\btechnologies\b/i
+    ];
+
+    suffixes.forEach(suffix => {
+        norm = norm.replace(suffix, '');
+    });
+
+    return norm.replace(/\s+/g, '-').trim(); // e.g. "deutsche bank" -> "deutsche-bank"
+};
+
 const normalizeString = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const extractTeamContext = (text: string): string => {
@@ -216,18 +289,28 @@ const generateFingerprint = (item: RawSignal): string => {
         }
     }
 
-    // Normalize Company Name (e.g. "Stripe Inc" -> "stripe")
-    const cleanCompany = normalizeString(company || 'unknown');
+    // Normalize Company Name across sources (e.g. "Stripe Inc" and "stripe.com" -> "stripe")
+    const cleanCompany = normalizeCompanyName(company || 'unknown');
 
     // 1. Deterministic ID Check (The Gold Standard)
     const jobId = extractJobId(item.url);
     if (jobId) {
-        // ID:stripe:123456
         return `ID:${cleanCompany}:${jobId}`;
     }
 
-    // 2. Fuzzy Matching V3 (Enhanced with 150-char snippet hash)
-    // "Senior Product Manager" -> "seniorproductmanager"
+    // 2. URL-path dedup: same hostname + path = same job regardless of query params
+    try {
+        const u = new URL(item.url);
+        const cleanPath = u.hostname + u.pathname.replace(/\/$/, '');
+        // If URL path is specific enough (more than just homepage), use it
+        if (u.pathname.length > 5) {
+            return `URL:${normalizeString(cleanPath)}`;
+        }
+    } catch (e) { /* fall through to fuzzy */ }
+
+    // 3. Fuzzy Matching V4 — title-based only (no snippet hash)
+    // Snippets vary wildly between search queries for the same job. 
+    // Use first 40 normalized chars of title + company + team context.
     let title = normalizeString(item.title);
 
     // Remove "at Company" from title for hash if present
@@ -238,11 +321,8 @@ const generateFingerprint = (item: RawSignal): string => {
     // Extract Context (Team/Dept) to differentiate "Stripe PM (Payments)" from "Stripe PM (Growth)"
     const team = extractTeamContext(item.title) || extractTeamContext(item.snippet);
 
-    // IMPROVED: Include first 150 chars of snippet for better differentiation
-    const snippetHash = item.snippet.slice(0, 150).replace(/[^a-zA-Z0-9]/g, '');
-
-    // Hash the combination
-    return `FUZZY_V3:${cleanCompany}:${title.slice(0, 15)}:${team}:${snippetHash}`;
+    // Use title (first 40 chars) + company + team. No snippet hash — too fragile.
+    return `FUZZY_V4:${cleanCompany}:${title.slice(0, 40)}:${team}`;
 };
 
 // --- STRATEGY: URL VALIDATOR ---
@@ -255,7 +335,7 @@ const isHighQualityJobLink = (url: string): boolean => {
 
         // REJECT GENERIC PAGES
         if (path === '/' || path === '/jobs' || path === '/jobs/' || path === '/careers') return false;
-        if (path.includes('/search') && !hostname.includes('linkedin.com')) return false; // LinkedIn search links can be valid specific queries
+        if (path.includes('/search') && !hostname.includes('linkedin.com')) return false;
         if (path.includes('/tags/') || path.includes('/category/') || path.includes('/archive/')) return false;
         if (path.includes('/blog/') || path.includes('/news/')) return false;
 
@@ -264,6 +344,11 @@ const isHighQualityJobLink = (url: string): boolean => {
             if (path.includes('/jobs/view/') || path.includes('/jobs/collections/')) return true;
             if (path.includes('/jobs/search') && search.includes('currentjobid=')) return true;
             return false;
+        }
+
+        // ACCEPT: Naukri and iimjobs (India boards)
+        if (hostname.includes('naukri.com') || hostname.includes('iimjobs.com') || hostname.includes('in.indeed.com')) {
+            return true;
         }
 
         return true;
@@ -277,8 +362,45 @@ const isHighQualityJobLink = (url: string): boolean => {
  * IMPROVED: More aggressive pre-filtering to reduce AI scoring costs.
  * Uses domain-based stop words to reject obviously unrelated roles.
  */
-const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]): boolean => {
-    const t = title.toLowerCase();
+const normalizeForMatch = (s: string) =>
+    (s || '')
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9\s/-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const tokenize = (s: string) =>
+    normalizeForMatch(s)
+        .split(/[\s/-]+/)
+        .map(w => w.trim())
+        .filter(Boolean);
+
+const hasAnyPhrase = (haystack: string, phrases: string[]) => {
+    const h = normalizeForMatch(haystack);
+    return phrases.some(p => {
+        const pp = normalizeForMatch(p);
+        return pp.length > 0 && h.includes(pp);
+    });
+};
+
+/**
+ * CLIENT-SIDE "BOUNCER" (Layer 2)
+ * IMPROVED: Adds a hard "semantic-ish" role gate using expanded roles, and
+ * avoids false positives from generic tokens like "manager" or "analyst".
+ */
+const passesRoleGuard = (
+    title: string,
+    snippet: string,
+    targetRoles: string[],
+    expandedRoles?: string[]
+): boolean => {
+    let t = title.toLowerCase();
+
+    // Handle Naukri-style titles: "Role - X Years - Company" → extract role part
+    if (t.includes(' - ') && (t.includes('years') || t.includes('yrs'))) {
+        t = t.split(' - ')[0].trim();
+    }
 
     // 1. Safe Pass: Generic Titles
     if (t.includes('careers') || t.includes('jobs at') || t.includes('join our team') || t.includes('openings')) {
@@ -286,37 +408,24 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
     }
 
     // 2. Comprehensive Stop Words by Domain
-    // These are roles that are almost never relevant to tech/product job seekers
     const universalStopWords = [
-        // Sales (unless explicitly wanted)
         'account executive', 'sales representative', 'sales manager', 'business development rep', 'bdr', 'sdr',
-        // Customer-facing support
         'customer support', 'customer service', 'customer success manager', 'support specialist',
-        // HR/Admin
         'recruiter', 'hr manager', 'human resources', 'office manager', 'administrative assistant', 'receptionist',
-        // Legal/Finance (unless explicitly wanted)
         'legal counsel', 'paralegal', 'accountant', 'auditor', 'tax specialist',
-        // Healthcare (unless explicitly wanted)
         'nurse', 'physician', 'medical assistant', 'pharmacist', 'dental',
-        // Retail/Food
         'cashier', 'barista', 'server', 'retail associate', 'store manager', 'shift supervisor',
-        // Construction/Manual
         'electrician', 'plumber', 'mechanic', 'driver', 'warehouse associate', 'forklift operator',
-        // Education (unless explicitly wanted)
         'teacher', 'tutor', 'professor', 'teaching assistant',
     ];
 
-    // Domain-specific allowed roles (these override stop words)
     const techRoles = ['engineer', 'developer', 'designer', 'product', 'data', 'analyst', 'manager', 'architect', 'devops', 'sre', 'qa', 'scientist'];
 
-    // Check if user is looking for something in stop words
     const userIsLookingForStopWord = targetRoles.some(r =>
         universalStopWords.some(sw => r.toLowerCase().includes(sw.split(' ')[0]))
     );
 
-    // Only filter if user is NOT looking for these roles
     if (!userIsLookingForStopWord) {
-        // Check if title contains stop words AND doesn't contain tech role keywords
         const hasStopWord = universalStopWords.some(sw => t.includes(sw));
         const hasTechKeyword = techRoles.some(tk => t.includes(tk));
 
@@ -325,29 +434,119 @@ const passesRoleGuard = (title: string, snippet: string, targetRoles: string[]):
         }
     }
 
-    // 3. Minimum Viable Relevance (Fuzzy Token Overlap)
-    // At least ONE meaningful word from the target roles must appear.
-    // e.g. If target is "Product Manager", we need "Product" OR "Manager". 
-    // This blocks "Janitor" but allows "Product Marketing Manager".
+    // 3. Hard semantic-ish gate: require match against expanded role phrases OR meaningful token overlap.
+    const rolePhrases = (expandedRoles && expandedRoles.length > 0 ? expandedRoles : targetRoles)
+        .filter(Boolean)
+        .slice(0, 40);
+
+    const combined = `${title} ${snippet}`;
+
+    // Common "too generic" tokens that cause false positives across role types.
+    const genericRoleTokens = new Set([
+        'manager', 'management', 'lead', 'leader', 'specialist', 'associate', 'executive',
+        'analyst', 'consultant', 'officer', 'director', 'head', 'principal', 'senior', 'sr', 'jr', 'staff',
+        'intern', 'internship', 'contract', 'fulltime', 'full', 'time', 'part', 'remote', 'hybrid', 'onsite', 'on', 'site'
+    ]);
+
+    // If we can match a concrete expanded role phrase, accept immediately.
+    if (rolePhrases.length > 0 && hasAnyPhrase(title, rolePhrases)) {
+        return true;
+    }
+
+    // Otherwise, fall back to token overlap with non-generic tokens.
     const significantTokens = new Set<string>();
-    targetRoles.forEach(role => {
-        role.toLowerCase().split(/[\s/-]/).forEach(word => {
-            if (word.length > 3 && word !== 'senior' && word !== 'lead' && word !== 'junior' && word !== 'staff') {
-                significantTokens.add(word);
-            }
+    rolePhrases.forEach(role => {
+        tokenize(role).forEach(word => {
+            if (word.length >= 3 && !genericRoleTokens.has(word)) significantTokens.add(word);
         });
     });
 
-    // If no significant tokens found in target (rare), just pass it.
     if (significantTokens.size === 0) return true;
 
-    const titleWords = t.split(/[\s/-]/);
-    const snippetWords = snippet.toLowerCase().split(/[\s/-]/);
-    const allWords = [...titleWords, ...snippetWords];
-    const hasOverlap = allWords.some(word => significantTokens.has(word));
+    // LEADERSHIP BYPASS
+    // If user's target roles contain leadership keywords, and the job title contains leadership keywords, we drop the exact token matching requirement to avoid dropping specialized variations (e.g. "Head of AI" vs "Principal ML Director").
+    const leadershipTokens = ['head', 'director', 'vp', 'vice president', 'principal', 'chief', 'founder'];
+    const userWantsLeadership = targetRoles.some(r => leadershipTokens.some(lt => r.toLowerCase().includes(lt)));
+    const jobIsLeadership = leadershipTokens.some(lt => t.includes(lt));
+    
+    if (userWantsLeadership && jobIsLeadership) {
+        return true; 
+    }
 
-    return hasOverlap;
+    const allWords = [...tokenize(title), ...tokenize(snippet)];
+    const overlapCount = allWords.reduce((acc, w) => acc + (significantTokens.has(w) ? 1 : 0), 0);
+    if (overlapCount === 0) return false;
+
+    return true;
 }
+
+/**
+ * STRICT LOCATION ADHERENCE (Phase 2)
+ * Applies a hard filter before LLM scoring.
+ */
+const passesLocationGuard = (item: RawSignal, config: any): boolean => {
+    const workMode: string = (config?.work_mode || 'any').toLowerCase();
+    const userLocs: string[] = [
+        ...(config?.expanded_locations?.length ? config.expanded_locations : []),
+        ...(config?.locations || [])
+    ].filter(Boolean);
+
+    // No location preference => accept (unless work_mode enforces remote/hybrid/onsite).
+    const userHasLocConstraint = userLocs.length > 0;
+
+    const flexibleSignals = ['flexible', 'anywhere', 'worldwide', 'global', 'any'];
+    const isFlexible = userLocs.some(l => flexibleSignals.some(sig => normalizeForMatch(l).includes(sig)));
+
+    const locRaw = item.location || '';
+    const combined = `${item.title} ${item.snippet} ${locRaw} ${item.url}`;
+    const combinedN = normalizeForMatch(combined);
+
+    const hasRemote = /\b(remote|work from home|wfh|distributed|virtual)\b/i.test(combined);
+    const hasHybrid = /\b(hybrid)\b/i.test(combined);
+    const hasOnsite = /\b(on[-\s]?site|in[-\s]?office|in office|office[-\s]?based)\b/i.test(combined);
+
+    // Work mode is always treated as strict (per Phase 2).
+    if (workMode === 'remote') {
+        if (!hasRemote) return false;
+        if (config?.remote_base_country) {
+            const base = normalizeForMatch(config.remote_base_country);
+            const restricted = /\b(us only|usa only|uk only|eu only|canada only|india only|germany only)\b/i.test(combined);
+            if (restricted && !combinedN.includes(base)) return false;
+        }
+        return true;
+    }
+
+    if (workMode === 'hybrid') {
+        if (!hasHybrid) return false;
+        // Also require a location match unless user explicitly flexible.
+        if (!userHasLocConstraint || isFlexible) return true;
+    }
+
+    if (workMode === 'onsite') {
+        if (!hasOnsite) return false;
+        if (!userHasLocConstraint || isFlexible) return true;
+    }
+
+    // If user has no location constraints and work_mode is 'any', accept.
+    if (!userHasLocConstraint) return true;
+    if (isFlexible) return true;
+
+    // If user explicitly wants remote via locations list, allow remote.
+    const userWantsRemoteViaLoc = userLocs.some(l => normalizeForMatch(l).includes('remote'));
+    if (userWantsRemoteViaLoc && hasRemote) return true;
+
+    // Otherwise require that at least one user location appears in the combined text.
+    // We match phrases (city/country names) rather than individual tokens to reduce false positives.
+    const match = userLocs.some(l => {
+        const ll = normalizeForMatch(l);
+        if (!ll || ll === 'remote') return false;
+        // Avoid matching tiny tokens like "in"
+        if (ll.length < 3) return false;
+        return combinedN.includes(ll);
+    });
+
+    return match;
+};
 
 /**
  * INTELLIGENT LOCATION NORMALIZATION
@@ -364,16 +563,22 @@ const normalizeLocationInput = (input: string): string => {
     return `"${spaced}"`;
 }
 
-export const buildSearchQueries = (config: any) => {
+export interface BuiltQueries {
+    highSignal: { name: string; q: string; tbs?: string }[];
+    expansion: { name: string; q: string; tbs?: string }[];
+}
+
+export const buildSearchQueries = (config: any): BuiltQueries => {
     if (!config || !config.target_roles) {
         throw new Error("Search Configuration is missing.");
     }
 
+    // MAP LOOKBACK TO API TBS
     const lookbackRaw = config.search_lookback || '14d';
-    const lookbackDays = parseInt(lookbackRaw.replace(/\D/g, '')) || 14;
-    const now = new Date();
-    const cutoffDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - lookbackDays));
-    const dateStr = cutoffDate.toISOString().split('T')[0];
+    let tbs = 'qdr:w';
+    if (lookbackRaw === '24h') tbs = 'qdr:d';
+    if (lookbackRaw === '7d' || lookbackRaw === '14d') tbs = 'qdr:w';
+    if (lookbackRaw === '30d') tbs = 'qdr:m';
 
     // Basic Negative Filters
     const baseNegatives = ['-intitle:resume', '-intitle:cv', '-inurl:blog'];
@@ -381,14 +586,10 @@ export const buildSearchQueries = (config: any) => {
     const negativeFilters = [...baseNegatives, ...userNegatives].join(' ');
 
     // SMART LOCATION INJECTION
-    // Priority: Use AI-Expanded Locations if available. Fallback to basic normalization.
     let locationsQuery = '';
     if (config.expanded_locations && config.expanded_locations.length > 0) {
-        // AI has already provided a rich list (e.g. ["Japan", "Tokyo", "Osaka"]).
-        // We wrap each in quotes to be precise.
         locationsQuery = `(${config.expanded_locations.map((l: string) => `"${l}"`).join(' OR ')})`;
     } else if (config.locations && config.locations.length > 0) {
-        // Legacy fallback
         locationsQuery = `(${config.locations.map(normalizeLocationInput).join(' OR ')})`;
     }
 
@@ -396,59 +597,132 @@ export const buildSearchQueries = (config: any) => {
         ? `(${config.industries.map((i: string) => `"${i}"`).join(' OR ')})`
         : '';
 
-    const queries: { name: string, q: string }[] = [];
-    const ROLE_CHUNK_SIZE = 4;
-    const roles = config.target_roles;
+    // WORK MODE INJECTION
+    let workModeQuery = '';
+    if (config.work_mode === 'remote') {
+        workModeQuery = '("remote" OR "work from home" OR "distributed" OR "work from anywhere")';
+        if (config.remote_base_country) {
+            workModeQuery += ` "${config.remote_base_country}"`;
+        }
+    } else if (config.work_mode === 'hybrid') {
+        workModeQuery = '"hybrid"';
+    } else if (config.work_mode === 'onsite') {
+        workModeQuery = '("onsite" OR "in-office" OR "on-site")';
+    }
 
-    const atsQueryPart = GLOBAL_ATS_TARGETS.map(t => `site:${t}`).join(' OR ');
+    const highSignal: { name: string, q: string, tbs?: string }[] = [];
+    const expansion: { name: string, q: string, tbs?: string }[] = [];
+    
+    // Cap to top 3 roles to prevent API explosion in discovery. 
+    // The full expanded list is still used perfectly for semantic filtering downstream.
+    const queryRoles = (config.target_roles || []).slice(0, 3);
 
-    for (let i = 0; i < roles.length; i += ROLE_CHUNK_SIZE) {
-        const chunk = roles.slice(i, i + ROLE_CHUNK_SIZE);
+    const atsTargets = getATSTargets();
+    const atsQueryPart = atsTargets.map(t => `site:${t}`).join(' OR ');
 
-        // STRICT MODE: Use Quotes for ATS/LinkedIn to avoid noise (e.g. "Product" ... "Manager")
-        const roleQueryStrict = `(${chunk.map((r: string) => `"${r}"`).join(' OR ')})`;
+    // ATOMIC ROLE QUERIES: Instead of massive OR clusters, we create specific queries per role.
+    queryRoles.forEach((role: string) => {
+        const suffix = ` - ${role}`;
 
-        // LOOSE MODE: No Quotes. Essential for Regional/Web to allow Google to handle translations/synonyms.
-        const roleQueryLoose = `(${chunk.map((r: string) => r).join(' OR ')})`;
-
-        const suffix = roles.length > 4 ? ` (Batch ${Math.floor(i / ROLE_CHUNK_SIZE) + 1})` : '';
-
-        // 1. ATS Direct (Strict)
-        queries.push({
+        // 1. ATS Direct (Strict) - high signal
+        highSignal.push({
             name: `ATS Direct${suffix}`,
-            q: `${atsQueryPart} ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}`
+            q: `(${atsQueryPart}) "${role}" ${industriesQuery} ${locationsQuery} ${workModeQuery} ${negativeFilters}`,
+            tbs
         });
 
-        // 2. Deep LinkedIn (Strict)
-        queries.push({
+        // 2. Deep LinkedIn (Strict) - high signal
+        highSignal.push({
             name: `LinkedIn${suffix}`,
-            q: `site:linkedin.com/jobs/view ${roleQueryStrict} ${industriesQuery} ${locationsQuery} ${negativeFilters} after:${dateStr}`
+            q: `site:linkedin.com/jobs/view "${role}" ${industriesQuery} ${locationsQuery} ${workModeQuery} ${negativeFilters}`,
+            tbs
         });
 
         // 3. Dynamic Regional Portals (Loose - For Local Language Support)
         if (config.regional_boards && config.regional_boards.length > 0) {
             const siteOperators = config.regional_boards.map((domain: string) => `site:${domain}`).join(' OR ');
-            queries.push({
+            expansion.push({
                 name: `Regional Portals${suffix}`,
-                q: `(${siteOperators}) ${roleQueryLoose} ${locationsQuery} ${negativeFilters} after:${dateStr}`
+                q: `(${siteOperators}) "${role}" ${locationsQuery} ${workModeQuery} ${negativeFilters}`,
+                tbs
             });
         }
 
-        // 4. Broad Web (Loose - For Synonym Matching)
-        queries.push({
+        // 4. Broad Web (Loose - For Synonym Matching) - expansion tier
+        expansion.push({
             name: `Web Discovery${suffix}`,
-            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com ${roleQueryLoose} ${industriesQuery} ${locationsQuery} "apply" ${negativeFilters} after:${dateStr}`
+            q: `(site:careers.* OR site:jobs.* OR site:join.*) -site:linkedin.com "${role}" ${industriesQuery} ${locationsQuery} ${workModeQuery} "apply" ${negativeFilters}`,
+            tbs
         });
-    }
+    });
+
+    return { highSignal, expansion };
+};
+
+// India location detection helper
+const INDIA_KEYWORDS = [
+    'india', 'bengaluru', 'bangalore', 'mumbai', 'hyderabad', 'pune',
+    'delhi', 'chennai', 'bhubaneswar', 'gurugram', 'noida', 'kolkata',
+    'remote india', 'gurgaon', 'new delhi'
+];
+
+const hasIndiaLocation = (config: any): boolean => {
+    const allLocs: string[] = [
+        ...(config.locations || []),
+        ...(config.expanded_locations || [])
+    ];
+    return allLocs.some(loc => 
+        INDIA_KEYWORDS.some(kw => loc.toLowerCase().includes(kw))
+    );
+};
+
+const buildIndiaQueries = (config: any, tbs: string): { name: string; q: string; tbs?: string }[] => {
+    const queries: { name: string; q: string; tbs?: string }[] = [];
+    const queryRoles = (config.target_roles || []).slice(0, 3);
+    const negativeFilters = ['-internship', '-fresher', '-intitle:resume', '-intitle:cv'];
+    const negs = negativeFilters.join(' ');
+
+    // India-specific locations
+    const indiaLocs = (config.expanded_locations || config.locations || [])
+        .filter((loc: string) => INDIA_KEYWORDS.some(kw => loc.toLowerCase().includes(kw)))
+        .slice(0, 3);
+    const locPart = indiaLocs.length > 0 
+        ? indiaLocs.map((l: string) => `"${l}"`).join(' OR ') 
+        : '"India"';
+
+    queryRoles.forEach((role: string) => {
+        const suffix = ` - ${role}`;
+
+        queries.push({
+            name: `Naukri${suffix}`,
+            q: `site:naukri.com "${role}" (${locPart}) ${negs}`,
+            tbs
+        });
+        queries.push({
+            name: `iimjobs${suffix}`,
+            q: `site:iimjobs.com "${role}" (${locPart}) ${negs}`,
+            tbs
+        });
+        queries.push({
+            name: `Indeed India${suffix}`,
+            q: `site:in.indeed.com "${role}" (${locPart}) ${negs}`,
+            tbs
+        });
+    });
 
     return queries;
 };
 
-export const searchForSignals = async (config: any, onLog: LogCallback, signal?: AbortSignal): Promise<RawSignal[]> => {
+export const searchForSignals = async (
+    config: any, 
+    onLog: LogCallback, 
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal
+): Promise<RawSignal[]> => {
     const serperKey = getKey(STORAGE_KEYS.SERPER_KEY);
     if (!serperKey) throw new Error("Serper Key missing.");
 
-    const queries = buildSearchQueries(config);
+    const { highSignal, expansion } = buildSearchQueries(config);
     const depthMode = config.search_depth || 'standard';
     const pages = depthMode === 'comprehensive' ? 4 : depthMode === 'deep' ? 2 : 1;
 
@@ -457,79 +731,144 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
         onLog(`Regional Satellites Active: ${config.regional_boards.join(', ')}`, 'success');
     }
 
-    onLog(`Initializing Search: ${queries.length} clusters x ${pages} pages...`, 'info');
+    onLog(`Initializing Search: ${highSignal.length + expansion.length} clusters x ${pages} pages...`, 'info');
+
+    let foundCount = 0;
+    let filteredCount = 0;
+
+    const updateProgress = (q?: string) => {
+        if (onProgress) onProgress({ found: foundCount, filtered: filteredCount, currentQuery: q });
+    };
 
     // 1. STANDARD SEARCH TASKS
-    const tasks: { q: any, page: number }[] = [];
-    queries.forEach(q => {
-        for (let i = 0; i < pages; i++) tasks.push({ q, page: i });
+    const tasksHigh: { q: any, page: number }[] = [];
+    highSignal.forEach(q => {
+        for (let i = 0; i < pages; i++) tasksHigh.push({ q, page: i });
+    });
+
+    const tasksExpansion: { q: any, page: number }[] = [];
+    expansion.forEach(q => {
+        for (let i = 0; i < pages; i++) tasksExpansion.push({ q, page: i });
     });
 
     // 2. JOBS API TASKS (NEW: High Signal)
     // Runs once for each Role x Location combination
     // Query format: "${role} jobs in ${location}"
     const jobsTasks: string[] = [];
-    const locs = config.locations.length > 0 ? config.locations : [""]; // If no location, global?
-    config.target_roles.forEach((role: string) => {
+    const MAX_JOBS_LOCATIONS = 5;
+    const expandedLocs = config.expanded_locations?.length > 0
+        ? config.expanded_locations
+        : (config.locations?.length > 0 ? config.locations : [""]);
+    const locs = expandedLocs.slice(0, MAX_JOBS_LOCATIONS); // Prefer expanded locations but cap count
+    const queryRoles = (config.target_roles || []).slice(0, 3);
+    queryRoles.forEach((role: string) => {
         locs.forEach((loc: string) => {
             jobsTasks.push(`${role} jobs ${loc ? `in ${loc}` : ''}`);
         });
     });
 
-    const BATCH_SIZE = 8;
+    const searchLimit = pLimit(3);
     let rawResults: RawSignal[] = [];
 
-    // EXECUTE STANDARD SEARCH
-    for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-        if (signal?.aborted) break;
-        const batch = tasks.slice(i, i + BATCH_SIZE);
+    // Helper functions for unified rate limiting
+    const processStandardSearch = async (task: any, defaultSource: string): Promise<RawSignal[]> => {
+        if (signal?.aborted) return [];
+        // Add minimal 500ms delay inside queue before firing to smooth out rate caps
+        await new Promise(r => setTimeout(r, 500));
+        try {
+            const qStr = typeof task.q === 'object' ? task.q.q : task.q;
+            const tbsStr = typeof task.q === 'object' ? task.q.tbs : task.tbs;
+            const nameStr = typeof task.q === 'object' ? task.q.name : task.name;
+            const pageOffset = (task.page || 0) * 20;
 
-        const batchPromises = batch.map(task => {
-            return performSerperSearch(serperKey, task.q.q, task.page * 20)
-                .then(res => res.map((r: any, idx: number) => ({
-                    id: `sig_${Date.now()}_${i}_${idx}`,
-                    source: task.q.name,
-                    url: r.link,
-                    title: r.title,
-                    snippet: r.snippet,
-                    timestamp: r.date || new Date().toISOString(),
-                    metadata: { query: task.q.q, rank: idx }
-                })))
-                .catch(() => []);
-        });
+            const res = await searchLimit(() => performSerperSearch(serperKey, qStr, pageOffset, tbsStr));
+            const mapped = res.map((r: any, idx: number) => ({
+                id: `sig_${Date.now()}_${Math.random().toString(36).substr(2)}_${idx}`,
+                source: nameStr || defaultSource,
+                url: r.link,
+                title: r.title,
+                snippet: r.snippet,
+                clean_snippet: cleanSnippet(r.snippet),
+                timestamp: r.date || new Date().toISOString(),
+                metadata: { query: qStr, rank: idx }
+            }));
+            
+            foundCount += mapped.length;
+            updateProgress(qStr);
+            return mapped;
+        } catch { return []; }
+    };
 
-        const batchResults = await Promise.all(batchPromises);
-        batchResults.forEach(res => rawResults.push(...res));
-        await new Promise(r => setTimeout(r, 200));
+    const processJobsApiSearch = async (query: string): Promise<RawSignal[]> => {
+        if (signal?.aborted) return [];
+        await new Promise(r => setTimeout(r, 500));
+        try {
+            const res = await searchLimit(() => performSerperJobsSearch(serperKey, query));
+            const mapped = res.map((r: any, idx: number) => ({
+                id: `job_${Date.now()}_${Math.random().toString(36).substr(2)}_${idx}`,
+                source: 'Google Jobs API',
+                url: r.link,
+                title: r.title,
+                snippet: r.snippet,
+                clean_snippet: cleanSnippet(r.snippet),
+                timestamp: r.date || new Date().toISOString(),
+                company: r.company,
+                location: r.location,
+                salary: r.salary,
+                metadata: { query: query, rank: idx }
+            }));
+
+            foundCount += mapped.length;
+            updateProgress(query);
+            return mapped;
+        } catch { return []; }
+    };
+
+    // 1. HIGH SIGNAL CLUSTER
+    const highSignalPromises = tasksHigh.map(t => processStandardSearch(t, "High Signal"));
+
+    // 2. INDIA BOARDS CLUSTER
+    const indiaDetected = hasIndiaLocation(config);
+    let indiaPromises: Promise<RawSignal[]>[] = [];
+    if (indiaDetected) {
+        const lookbackRaw = config.search_lookback || '14d';
+        let tbs = 'qdr:w';
+        if (lookbackRaw === '24h') tbs = 'qdr:d';
+        if (lookbackRaw === '7d' || lookbackRaw === '14d') tbs = 'qdr:w';
+        if (lookbackRaw === '30d') tbs = 'qdr:m';
+        const indiaQueries = buildIndiaQueries(config, tbs);
+
+        onLog(`India Boards Active: Searching Naukri, iimjobs, Indeed India (${indiaQueries.length} queries)...`, 'success');
+        indiaPromises = indiaQueries.map(q => processStandardSearch(q, "India Boards"));
     }
 
-    // EXECUTE JOBS API SEARCH (Parallel)
-    // We only run this if we haven't aborted
-    if (!signal?.aborted && jobsTasks.length > 0) {
+    // 3. GOOGLE JOBS API CLUSTER
+    let jobsApiPromises: Promise<RawSignal[]>[] = [];
+    if (jobsTasks.length > 0) {
         onLog(`Checking Google Jobs API for ${jobsTasks.length} targeted queries...`, 'info');
+        jobsApiPromises = jobsTasks.map(q => processJobsApiSearch(q));
+    }
 
-        for (let i = 0; i < jobsTasks.length; i += BATCH_SIZE) {
-            if (signal?.aborted) break;
-            const batch = jobsTasks.slice(i, i + BATCH_SIZE);
-            const batchPromises = batch.map(query => {
-                return performSerperJobsSearch(serperKey, query)
-                    .then(res => res.map((r: any, idx: number) => ({
-                        id: `job_${Date.now()}_${i}_${idx}`,
-                        source: 'Google Jobs API',
-                        url: r.link,
-                        title: r.title,
-                        snippet: r.snippet, // This is usually full description in Jobs API
-                        timestamp: r.date || new Date().toISOString(),
-                        company: r.company,
-                        location: r.location,
-                        salary: r.salary,
-                        metadata: { query: query, rank: idx }
-                    })))
-                    .catch(() => []);
-            });
-            const batchResults = await Promise.all(batchPromises);
-            batchResults.forEach(res => rawResults.push(...res));
-        }
+    // AWAIT ALL CLUSTERS SIMULTANEOUSLY (Managed purely by pLimit(5))
+    const clusters = await Promise.all([
+        Promise.all(highSignalPromises),
+        Promise.all(indiaPromises),
+        Promise.all(jobsApiPromises)
+    ]);
+
+    clusters.forEach(clusterResults => {
+        clusterResults.forEach(batch => rawResults.push(...batch));
+    });
+
+    // 4. EXPANSION CLUSTER (Conditional Fallback)
+    const MIN_SIGNALS_FOR_SKIP = 60;
+    if (!signal?.aborted && rawResults.length < MIN_SIGNALS_FOR_SKIP && tasksExpansion.length > 0) {
+        onLog(`High-signal sources yielded ${rawResults.length} results, dynamically expanding to regional/web clusters...`, 'info');
+        
+        const expansionPromises = tasksExpansion.map(t => processStandardSearch(t, "Expansion"));
+        const expansionResults = await Promise.all(expansionPromises);
+        
+        expansionResults.forEach(batch => rawResults.push(...batch));
     }
 
     // --- FILTERING & DEDUPLICATION STRATEGY ---
@@ -538,13 +877,34 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
     let duplicates = 0;
     let rejectedByGuard = 0;
 
+    const GLOBAL_SPAM_BLOCKLIST = [
+        'turing', 'bairesdev', 'crossover', 'cybercoders', 'canonical', 
+        'devsdata', 'optym', 'toptal', 'andela', 'dice.com', 'insight global'
+    ];
+
     rawResults.forEach(item => {
+        // 0. SPAM GUARD
+        const itemStr = `${item.url} ${item.title} ${item.company || ''}`.toLowerCase();
+        if (GLOBAL_SPAM_BLOCKLIST.some(spam => itemStr.includes(spam))) {
+            rejectedByGuard++;
+            filteredCount++;
+            return;
+        }
+
         // 1. Basic URL Check
         if (!isHighQualityJobLink(item.url)) return;
 
-        // 2. THE BOUNCER (Layer 2)
-        if (!passesRoleGuard(item.title, item.snippet, config.target_roles)) {
+        // 2. THE BOUNCER (Layer 2 - Guard)
+        if (!passesRoleGuard(item.title, item.snippet, config.target_roles, config.expanded_roles)) {
             rejectedByGuard++;
+            filteredCount++;
+            return;
+        }
+
+        // 3. STRICT LOCATION ADHERENCE (Phase 2)
+        if (!passesLocationGuard(item, config)) {
+            rejectedByGuard++;
+            filteredCount++;
             return;
         }
 
@@ -570,9 +930,52 @@ export const searchForSignals = async (config: any, onLog: LogCallback, signal?:
         }
     });
 
+    updateProgress();
+
     const unique = Array.from(fingerprintMap.values());
     onLog(`Analysis: Found ${rawResults.length} raw signals.`, 'info');
     onLog(`Filtration: Removed ${duplicates} duplicates and ${rejectedByGuard} obvious mismatches.`, 'success');
 
     return unique;
+};
+
+// Company news enrichment for top leads
+import type { ScoredLead } from './scoring';
+
+export const enrichLeadsWithCompanyNews = async (
+    leads: ScoredLead[],
+    serperKey: string
+): Promise<ScoredLead[]> => {
+    const topLeads = leads
+        .filter(l => l.score >= 70)
+        .slice(0, 10);
+
+    if (topLeads.length === 0) return leads;
+
+    const enriched = [...leads];
+    const companySet = new Set<string>();
+
+    for (const lead of topLeads) {
+        if (companySet.has(lead.company_name)) continue;
+        companySet.add(lead.company_name);
+
+        try {
+            const news = await fetchCompanyNews(serperKey, lead.company_name);
+            if (news) {
+                // Apply to all leads from this company
+                enriched.forEach(l => {
+                    if (l.company_name === lead.company_name) {
+                        l.company_news = news;
+                    }
+                });
+            }
+        } catch {
+            // Non-critical, skip
+        }
+
+        // 300ms stagger to avoid rate limits
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    return enriched;
 };

@@ -1,0 +1,49 @@
+# Job Radar: Comprehensive Improvement Plan
+
+Based on the full system audit and the latest user feedback regarding irrelevant roles, location mismatches, and UI filter duplication, here is the complete, prioritized roadmap to make Job Radar production-ready.
+
+---
+
+## Phase 1: Security & Foundation (Critical Tier)
+*The most urgent structural changes needed to prevent security risks and memory crashes.*
+
+1. **Hybrid Architecture & Secret Proxy:** Move all LLM (Gemini/OpenAI) and Serper API keys out of the browser. Introduce a lightweight backend (e.g., Vercel Functions, Cloudflare Workers) to act as a secure proxy.
+2. **Robust Persistence (IndexedDB):** Replace `LocalStorage` with `IndexedDB` for storing large result sets and cache, separating hot UI state from durable data to prevent the browser from freezing or clearing data unexpectedly.
+3. **State Management Refactor:** Split the monolithic Zustand store into domain-specific slices (e.g., Config State, Discovery State, Scoring State, UI State).
+4. **Basic Observability:** Add basic logging to track LLM provider success rates, JSON parsing failures, and API timeouts.
+
+---
+
+## Phase 2: Strict Filtering & Relevance (High Priority)
+*Addressing the user-reported issues where irrelevant jobs and mismatched locations pollute the feed.*
+
+1. **Hard Out-Filtering of Role Mismatches:** 
+   - **The Problem:** The app is showing jobs like *Business Finance* and *QA Engineer* when searching for *Product Manager*. 
+   - **The Fix:** Implement semantic role matching and a **hard rejection gate**. Jobs that completely fail a semantic role check should be immediately dropped *before* being sent to the AI for expensive scoring, ensuring they never reach the UI.
+2. **Strict Location Adherence:**
+   - **The Problem:** Roles with "Location Mismatch" warnings are still appearing in the feed.
+   - **The Fix:** Treat location preferences as strict constraints rather than soft penalties (unless explicitly set to "flexible" by the user). If a job does not match the target city/country or remote criteria, filter it out completely.
+3. **Fix the "Score 25" Fallback Pollution:**
+   - **The Problem:** Jobs with "AI analysis unavailable - manual review recommended" are given a default score of `25` and dumped into the feed. 
+   - **The Fix:** Do not pollute the main feed with failed AI responses. Either automatically queue them for a retry, or place them in a separate "Unscored/Failed" tab rather than pretending they are a valid 25-point lead.
+
+---
+
+## Phase 3: AI Scoring Engine & Routing
+*Making the AI smarter, more reliable, and transparent.*
+
+1. **Smart LLM Routing & Structured Outputs:** Use cheap, fast models for query expansion, and reliable models (like Gemini 1.5 Pro or GPT-4o) specifically for structured scoring. Enforce strict JSON output using validation libraries like `zod`.
+2. **Explainable Scoring:** Users need to trust the system. Expose confidence scores and provide concise, human-readable summaries of exactly *why* a job was penalized.
+3. **Intelligent Deduplication:** Use semantic similarity checks for titles and descriptions to group duplicate postings across different job boards into a single listing.
+
+---
+
+## Phase 4: UI Refinement & User Experience
+*Cleaning up the interface and handling large amounts of data gracefully.*
+
+1. **Consolidate Location Filters:** 
+   - **The Problem:** The UI currently shows duplicate active location filters (e.g., "My Locations" and "Location"). 
+   - **The Fix:** Merge these into a single, intuitive location filter component to avoid confusion.
+2. **Progressive Feed Loading:** Stop the "15-second blank screen" during initial searches. Stream discovery results into the UI immediately using skeleton cards and a pipeline tracker (e.g., "Found 50 -> Scoring...").
+3. **Virtualized Rendering:** Implement list virtualization so the browser only renders the job cards actively visible on the screen, keeping scrolling smooth even with 500+ jobs.
+4. **The "Learning" System (Feedback Loop):** Track when a user saves, applies to, or hides a role. Use this data to train the profile weights and improve the relevance of future runs automatically.

@@ -4,7 +4,11 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { verifyPerplexityKey } from '../lib/perplexity';
 import { verifySerperKey } from '../lib/serper';
+import { verifyGeminiKey } from '../lib/gemini';
+import { verifyGroqKey } from '../lib/groq';
 import { saveKey, STORAGE_KEYS, getKey, getBackedUpKeys } from '../lib/storage';
+import { useAppStore } from '../lib/store';
+import { CustomSelect } from './CustomSelect';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -15,38 +19,64 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [llmKey, setLlmKey] = useState('');
+  // State for all keys
+  const [perplexityKey, setPerplexityKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
+  const [groqKey, setGroqKey] = useState('');
   const [serperKey, setSerperKey] = useState('');
+  const [activeProvider, setActiveProvider] = useState('perplexity');
 
   // Hydrate with smart backup restoration
   useEffect(() => {
-    const storedPerplexity = getKey(STORAGE_KEYS.PERPLEXITY_KEY);
-    const storedSerper = getKey(STORAGE_KEYS.SERPER_KEY);
     const backup = getBackedUpKeys();
     
-    // 1. Restore Intelligence (Brain)
-    if (storedPerplexity) {
-        setLlmKey(storedPerplexity);
-    } else if (backup && backup.perplexity) {
-        setLlmKey(backup.perplexity);
-    }
-
-    // 2. Restore Search (Eyes)
-    if (storedSerper) {
-        setSerperKey(storedSerper);
-    } else if (backup && backup.serper) {
-        setSerperKey(backup.serper);
-    }
+    setPerplexityKey(getKey(STORAGE_KEYS.PERPLEXITY_KEY) || backup?.perplexity || '');
+    setGeminiKey(getKey(STORAGE_KEYS.GEMINI_KEY) || backup?.gemini || '');
+    setGroqKey(getKey(STORAGE_KEYS.GROQ_KEY) || backup?.groq || '');
+    setSerperKey(getKey(STORAGE_KEYS.SERPER_KEY) || backup?.serper || '');
+    setActiveProvider(getKey(STORAGE_KEYS.ACTIVE_LLM_PROVIDER) || backup?.activeProvider || 'perplexity');
   }, []);
 
-  const handleVerifyBrain = async () => {
-    setIsLoading(true); setError(null);
-    if (!llmKey.trim()) { setError("Key required"); setIsLoading(false); return; }
+  const handleVerifyLLM = async () => {
+    setIsLoading(true);
+    setError(null);
+    let res: { isValid: boolean; error?: string } = { isValid: false, error: 'Unknown provider' };
+    let keyToSave = '';
+    let keyType = '';
 
-    const res = await verifyPerplexityKey(llmKey);
+    switch (activeProvider) {
+        case 'perplexity':
+            keyToSave = perplexityKey;
+            if (!keyToSave.trim()) { setError("Key required"); setIsLoading(false); return; }
+            keyType = STORAGE_KEYS.PERPLEXITY_KEY;
+            res = await verifyPerplexityKey(keyToSave);
+            break;
+        case 'gemini':
+            keyToSave = geminiKey;
+            if (!keyToSave.trim()) { setError("Key required"); setIsLoading(false); return; }
+            keyType = STORAGE_KEYS.GEMINI_KEY;
+            res = await verifyGeminiKey(keyToSave);
+            break;
+        case 'groq':
+            keyToSave = groqKey;
+            if (!keyToSave.trim()) { setError("Key required"); setIsLoading(false); return; }
+            keyType = STORAGE_KEYS.GROQ_KEY;
+            res = await verifyGroqKey(keyToSave);
+            break;
+        case 'local':
+            keyToSave = "local";
+            keyType = STORAGE_KEYS.ACTIVE_LLM_PROVIDER; // Dummy
+            res = { isValid: true };
+            break;
+        default:
+            setError("This provider is not yet supported in the setup wizard.");
+            setIsLoading(false);
+            return;
+    }
     
     if (res.isValid) {
-        saveKey(STORAGE_KEYS.PERPLEXITY_KEY, llmKey);
+        saveKey(keyType, keyToSave);
+        useAppStore.getState().setActiveProvider(activeProvider);
         setStep(2);
     } else {
         setError(`Validation Failed: ${res.error}`);
@@ -68,44 +98,103 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       setIsLoading(false);
   };
 
+  const renderLLMStep = () => {
+    const providerInfo: any = {
+        perplexity: {
+            description: "We use Perplexity Sonar for high-speed analysis and deep strategy.",
+            label: "Perplexity API Key",
+            placeholder: "pplx-...",
+            value: perplexityKey,
+            setter: setPerplexityKey,
+            link: "https://www.perplexity.ai/settings/api"
+        },
+        gemini: {
+            description: "We use Google Gemini for fast and cost-effective analysis.",
+            label: "Gemini API Key",
+            placeholder: "AIza...",
+            value: geminiKey,
+            setter: setGeminiKey,
+            link: "https://aistudio.google.com/app/apikey"
+        },
+        groq: {
+            description: "We use Groq (Llama 3.3) for absolutely blazing fast, unthrottled semantic scoring.",
+            label: "Groq API Key",
+            placeholder: "gsk_...",
+            value: groqKey,
+            setter: setGroqKey,
+            link: "https://console.groq.com/keys"
+        },
+        local: {
+            description: "No APIs required. 100% free, completely unlimited, and absolutely instant heuristic scoring.",
+            label: "No API Key Required",
+            placeholder: "System Ready.",
+            value: "",
+            setter: () => {},
+            link: ""
+        }
+    }
+    const currentProvider = providerInfo[activeProvider];
+
+    return (
+        <div className="space-y-6">
+            <div className="premium-panel p-4">
+                <p className="text-sm text-[#1D1D1F] dark:text-slate-300">
+                    {currentProvider.description}
+                </p>
+            </div>
+
+            <div className='space-y-1'>
+                <label className="text-sm font-medium text-[#1D1D1F] dark:text-slate-300 block">AI Provider</label>
+                <CustomSelect 
+                    value={activeProvider} 
+                    onChange={(e: any) => setActiveProvider(e.target.value)} 
+                    options={[
+                        { value: "perplexity", label: "Perplexity" },
+                        { value: "gemini", label: "Google Gemini" },
+                        { value: "groq", label: "Groq (Llama 3.3 Fast)" },
+                        { value: "local", label: "Local Heuristic (Instant & Unlimited)" },
+                        { value: "openai", label: "OpenAI (coming soon)" },
+                        { value: "ollama", label: "Ollama (coming soon)" }
+                    ]}
+                />
+            </div>
+
+            <Input 
+                label={currentProvider.label}
+                type="password"
+                value={currentProvider.value} 
+                onChange={e => currentProvider.setter(e.target.value)} 
+                placeholder={currentProvider.placeholder}
+            />
+             <a href={currentProvider.link} target="_blank" className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 hover:underline inline-block mt-3 px-1 py-2 font-medium">
+                Get API Key ↗
+            </a>
+            
+            {error && <p className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 p-2 rounded">{error}</p>}
+            
+            <Button onClick={handleVerifyLLM} isLoading={isLoading} className="w-full mt-4">
+                Connect Brain 🧠
+            </Button>
+        </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="max-w-lg w-full">
-        <Card className="animate-in fade-in zoom-in duration-300 border-indigo-500/30">
+        <Card className="animate-in fade-in zoom-in duration-300 border-indigo-200 dark:border-indigo-500/30">
             <div className="space-y-6 text-center mb-8">
-              <h1 className="text-2xl font-bold text-white">System Initialization</h1>
-              <p className="text-slate-400">
-                  {step === 1 ? "Step 1: Configure Intelligence (Perplexity)" : "Step 2: Configure Search (Serper)"}
+              <h1 className="text-2xl font-bold text-[#1D1D1F] dark:text-white">System Initialization</h1>
+              <p className="text-[#86868B] dark:text-slate-400">
+                  {step === 1 ? "Step 1: Configure Intelligence" : "Step 2: Configure Search (Serper)"}
               </p>
             </div>
 
-            {step === 1 ? (
+            {step === 1 ? renderLLMStep() : (
                 <div className="space-y-6">
-                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                        <p className="text-sm text-slate-300">
-                           We use <strong>Perplexity Sonar</strong> for high-speed analysis and <strong>Sonar Reasoning</strong> for deep strategy.
-                        </p>
-                    </div>
-
-                    <Input 
-                        label="Perplexity API Key"
-                        type="password"
-                        value={llmKey} 
-                        onChange={e => setLlmKey(e.target.value)} 
-                        placeholder="pplx-..." 
-                    />
-                    
-                    {error && <p className="text-red-400 text-sm bg-red-950/30 p-2 rounded">{error}</p>}
-                    
-                    <Button onClick={handleVerifyBrain} isLoading={isLoading} className="w-full mt-4">
-                        Connect Brain 🧠
-                    </Button>
-                </div>
-            ) : (
-                <div className="space-y-6">
-                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-4">
-                        <p className="text-sm text-slate-300">
-                            We use <strong className="text-emerald-400">Serper (Google Search API)</strong> to find accurate, clickable job links. This prevents the AI from "hallucinating" fake URLs.
+                    <div className="premium-panel p-4 mb-4">
+                        <p className="text-sm text-[#1D1D1F] dark:text-slate-300">
+                            We use <strong className="text-[#34C759] dark:text-emerald-400">Serper (Google Search API)</strong> to find accurate, clickable job links. This prevents the AI from "hallucinating" fake URLs.
                         </p>
                     </div>
 
@@ -116,15 +205,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                         onChange={e => setSerperKey(e.target.value)} 
                         placeholder="API Key..." 
                     />
-                    <a href="https://serper.dev/" target="_blank" className="text-[10px] text-emerald-400 hover:underline block mt-1">
+                    <a href="https://serper.dev/" target="_blank" className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 dark:hover:text-emerald-300 hover:underline inline-block mt-3 px-1 py-2 font-medium">
                         Get Free Serper Key (2,500 free queries) ↗
                     </a>
 
-                    {error && <p className="text-red-400 text-sm bg-red-950/30 p-2 rounded">{error}</p>}
+                    {error && <p className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 p-2 rounded">{error}</p>}
 
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={() => setStep(1)} className="w-1/3">Back</Button>
-                        <Button onClick={handleVerifyEyes} isLoading={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500">
+                        <Button onClick={handleVerifyEyes} isLoading={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white">
                             Activate Eyes & Launch 🚀
                         </Button>
                     </div>

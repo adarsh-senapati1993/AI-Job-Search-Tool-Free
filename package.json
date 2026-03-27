@@ -10,12 +10,14 @@
   },
   "dependencies": {
     "clsx": "^2.1.0",
+    "p-limit": "^7.3.0",
     "pdfjs-dist": "3.11.174",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { chatWithAI } from '../lib/ai'; // UPDATED IMPORT
-import { getKey, getConfig, STORAGE_KEYS } from '../lib/storage';
+import { chatWithAI, CandidateProfile } from '../lib/ai';
+import { useAppStore } from '../lib/store';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
+import { getLatestRun } from '../lib/storage';
 
 interface Message {
   role: 'user' | 'model';
   text: string;
+  isError?: boolean;
 }
 
 export const ChatBot = () => {
+  const { userConfig, activeProvider } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -33,15 +36,24 @@ export const ChatBot = () => {
     setIsLoading(true);
 
     try {
-      const config = getConfig();
+      const config = userConfig as CandidateProfile | null;
       
       let systemInstruction = "You are an expert Career Coach and Technical Recruiter. Help the user with their job search strategy, interview prep, and negotiation.";
       if (config) {
         systemInstruction += `\n\nUser Profile Context:\nTarget Roles: ${config.target_roles?.join(', ')}\nSkills: ${config.skills?.join(', ')}\nSeniority: ${config.seniority_level}`;
       }
+
+      // Inject discovered leads for contextual advice
+      const latestRun = getLatestRun();
+      if (latestRun && latestRun.leads.length > 0) {
+        const topLeads = latestRun.leads
+          .sort((a: any, b: any) => (b.score || 0) - (a.score || 0))
+          .slice(0, 5);
+        systemInstruction += `\n\nUser's Top Discovered Jobs:\n${topLeads.map((l: any, i: number) => `${i+1}. ${l.role_title} at ${l.company_name} (Score: ${l.score}) - ${l.url}`).join('\n')}`;
+        systemInstruction += `\n\nYou can reference these jobs when giving advice. For example, if the user asks about interview prep, tailor it to these specific companies and roles.`;
+      }
       
-      // Convert UI messages to history format
-      const history = messages.map(m => ({
+      const history = messages.filter(m => !m.isError).map(m => ({
           role: m.role,
           parts: [{ text: m.text }]
       }));
@@ -51,7 +63,7 @@ export const ChatBot = () => {
       setMessages(prev => [...prev, { role: 'model', text: responseText || "I couldn't generate a response." }]);
     } catch (error: any) {
       console.error("Chat Error:", error);
-      setMessages(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error. Check your connection." }]);
+      setMessages(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error. Check your connection.", isError: true }]);
     } finally {
       setIsLoading(false);
     }
@@ -64,16 +76,16 @@ export const ChatBot = () => {
     }
   };
 
+  const providerName = activeProvider.charAt(0).toUpperCase() + activeProvider.slice(1);
+
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end pointer-events-none">
-      {/* Chat Window */}
       {isOpen && (
         <Card className="pointer-events-auto w-80 md:w-96 h-[500px] mb-4 flex flex-col bg-slate-900 border-indigo-500/30 shadow-2xl animate-in slide-in-from-bottom-5 duration-200">
-          {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-xl">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-              <h3 className="font-bold text-white">Career Assistant (Perplexity)</h3>
+              <h3 className="font-bold text-white">Career Assistant ({providerName})</h3>
             </div>
             <button 
               onClick={() => setIsOpen(false)}
@@ -83,14 +95,13 @@ export const ChatBot = () => {
             </button>
           </div>
 
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 && (
               <div className="text-center text-slate-500 text-sm mt-10">
                 <p>👋 Hi! I'm your AI Coach.</p>
                 <p className="mt-2">Ask me about:</p>
                 <ul className="mt-2 space-y-1 text-xs text-slate-400">
-                   <li>• Interview tips for {getConfig()?.target_roles?.[0] || "your role"}</li>
+                   <li>• Interview tips for {userConfig?.target_roles?.[0] || "your role"}</li>
                    <li>• Salary negotiation tactics</li>
                    <li>• Resume feedback</li>
                 </ul>
@@ -99,10 +110,10 @@ export const ChatBot = () => {
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div 
-                  className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+                  className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${ 
                     m.role === 'user' 
                       ? 'bg-indigo-600 text-white rounded-tr-none' 
-                      : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
+                      : m.isError ? 'bg-red-900/50 text-red-200 border border-red-700/50 rounded-tl-none' : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
                   }`}
                 >
                   {m.text}
@@ -123,7 +134,6 @@ export const ChatBot = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
           <div className="p-4 border-t border-slate-700 bg-slate-800/30">
             <div className="flex gap-2">
               <input
@@ -146,7 +156,6 @@ export const ChatBot = () => {
         </Card>
       )}
 
-      {/* Toggle Button */}
       <div className="pointer-events-auto">
         <button
             onClick={() => setIsOpen(!isOpen)}

@@ -1,132 +1,76 @@
-# 🛰️ Job Radar + Outreach Copilot (v3.0)
+<div align="center">
 
-> **The Inverse Engineering Job Search Platform.**
-> Stop doom-scrolling LinkedIn. Start commanding your career search.
+# 🛰️ Job Radar (Zero-Backend Edition)
+**Fully client-side, hyper-targeted job discovery pipeline.**
 
-**Job Radar** is a local "Mission Control" center for your job search. Unlike standard job boards where you search for jobs, **Job Radar searches for YOU.**
+Bypass algorithmic noise. Snipe Applicant Tracking Systems directly. Gatekeep leads with strict AI logic.
 
-![Dashboard](https://github.com/adarsh-senapati1993/AI-Job-Search-Tool-Free/raw/main/public/dashboard_preview.png)
+[Features](#features) • [Installation](#installation) • [Architecture](#architecture) • [Engineering Philosophy](#engineering-philosophy)
 
-## 💡 The Philosophy: "Inverse Engineering"
+![Architecture Demo](https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&q=80&w=1200)
 
-Standard job searching is **Pull-based**: You go to LinkedIn, type keywords, and scroll endlessly.
-**Job Radar is Push-based**: You define a "Signal Profile," and the Agent scans the entire web to push relevant opportunities to you.
+</div>
 
-**Why this is superior:**
-* **🔓 No Vendor Lock-in:** We don't just scrape LinkedIn. We use Google Dorks to simultaneously scan ATS systems (Greenhouse, Lever), company career pages, and regional boards.
-* **🧠 Cognitive Offloading:** Instead of reading 100 job descriptions to find 5 matches, the AI reads 100 and presents the top 5 with a **"Glass Box" score** explaining *exactly* why they match.
-* **🛡️ Privacy First:** Everything runs locally in your browser. Your resume and API keys never touch a 3rd party database.
+## 💥 The Problem This Solves
+Job boards like LinkedIn and Indeed are severely broken. They prioritize promoted listings, recycle "ghost jobs" from aggregator spam agencies (Turing, BairesDev), and obscure chronological freshness.
 
----
-
-## 🚀 NEW in Version 3.0 (Latest)
-
-* **🕵️ Deep Analysis:** One-click "Deep Dive" on any job. The AI browses the web to generate a 3-part report: **Executive Summary**, **Culture Fit**, and **Interview Tips** specific to that company.
-* **📸 Layout-Aware OCR:** Now accepts **Image Uploads (PNG/JPG)** of resumes alongside PDFs. It uses `tesseract.js` to preserve layout context.
-* **♟️ Strategy Room V2:**
-    * **Interactive Location Expansion:** Type "London" -> AI expands to "London, Reading, Cambridge" instantly. Direct edit support.
-    * **Visual Logic:** See exactly which ATS and Regional Boards are being targeted.
-* **🤝 Hiring Manager Copilot:**
-    * **Auto-Find HM:** The AI hunts for the specific Hiring Manager (e.g., "VP Engineering") for the role.
-    * **Contextual DM Generator:** Drafts a "Bridge Message" connecting *your* specific past achievement to *their* specific job requirement.
-* **⚖️ Comparative Ranking:** After scoring, the AI performs a final "Tournament Pass" to rank the Top 5 candidates against each other, breaking ties with human-like intuition.
+**Job Radar** is not a job board. It is an orchestration engine. It runs entirely locally in your browser, constructing atomic queries directly against major Application Tracking Systems (Greenhouse, Lever, Ashby) and passing the raw HTML through a strict, user-controlled LLM to mathematically penalize and filter out irrelevancy.
 
 ---
 
-## ⚡ Quick Start Guide
+## ✨ Cutting-Edge Capabilities
 
-### Step 0: Prerequisites
-1.  **Node.js (LTS Version):** [Download Here](https://nodejs.org/)
-2.  **API Keys** (The "Fuel" for the AI - cost is <$5):
-    *   **Perplexity API:** [Get Key](https://www.perplexity.ai/settings/api) (For reasoning & writing)
-    *   **Serper API:** [Get Key](https://serper.dev/) (For Google Search access)
+### 1. 🎯 Atomic Source Sniping
+We don't rely on RSS feeds. The engine breaks your target roles into combinatorial queries (e.g., `Product Manager jobs in New York site:boards.greenhouse.io`) to saturate API density limits and guarantee maximum recall precision.
 
-## 🛠️ Installation (Step-by-Step)
+### 2. 🛡️ The Semantic Gatekeeper
+Your LLM isn't just a summarizer; it's a ruthless technical recruiter. Jobs are passed through a strict boolean gauntlet:
+*   **Hard Geo-Penalty:** -15 penalty for ambiguous geographic matches.
+*   **Seniority Enforcement:** Automatically calculates +/- 1 level variance (A Senior candidate will soft-reject Junior roles).
+*   **Spam Blacklisting:** Hardcoded client-side blocklists instantly vaporize ghost jobs from known agencies before they burn your LLM tokens.
 
-### Step 1: Download the App
-1.  Scroll to the top of this GitHub page.
-2.  Click the green **<> Code** button.
-3.  Click **Download ZIP**.
-4.  Find the ZIP file in your Downloads folder and **Unzip/Extract** it.
+### 3. ⏱️ True Chronological Fetching
+By wiring the Serper API into Google's native Time-Based Search (`tbs=qdr:w`), Job Radar mathematically enforces freshness constraints (Past 24H, Past Week) directly at the Google Server level instead of relying on brittle date-string parsing. 
 
-### Step 2: Open the Terminal
-*   **On Mac:** Press `Command + Space`, type `Terminal`, and hit Enter.
-*   **On Windows:** Press the `Windows Key`, type `PowerShell`, and hit Enter.
-
-### Step 3: Go to the Folder
-1.  In the terminal, type `cd ` (type **cd** followed by a **space**).
-2.  **Drag and drop** the unzipped folder from your desktop into the terminal window.
-3.  It should look like: `cd /Users/yourname/Downloads/job-radar-main`.
-4.  Press **Enter**.
-
-### Step 4: Install Dependencies (The "Scary" Part)
-1.  Type `npm install` and press **Enter**.
-2.  **What you will see:**
-    *   You will see text scrolling and progress bars.
-    *   ⚠️ **IGNORE YELLOW WARNINGS:** You might see text like `npm warn deprecated` or `found 3 vulnerabilities`. **This is normal.** It just means some sub-tools are older. As long as you see the line **"added X packages"** at the end, it worked.
-    *   *Do not run `npm audit fix` unless you know what you are doing.*
-
-### Step 5: Launch the App 🚀
-1.  Type `npm run dev` and press **Enter**.
-2.  You should see green text saying:
-    ```
-    ➜  Local:   http://localhost:5173/
-    ```
-3.  **Hold Command (Mac) or Ctrl (Windows)** and click that link.
-4.  The app will open in your browser!
----
-
-## 🎮 Workflow Guide
-
-### 1. Mission Configuration
-* **Upload Resume:** PDF, Text, or **scanned Images**. The AI extracts not just keywords, but *seniority context*.
-* **Define Strategy:**
-    * **Roles:** "Product Manager", "Staff Engineer".
-    * **Locations:** Use the **✨ Expand** button to let AI find commuter towns and hubs.
-    * **Depth:** Choose "Standard" (Fast) or "Max" (Comprehensive - 4x coverage).
-
-### 2. The Strategy Room
-* Review the **"Active Search Radar"**.
-* Use the **Co-Pilot** (Chatbox) to tweak logic in plain English (e.g., *"Exclude crypto companies but include Fintech"*).
-* Confirm to launch.
-
-### 3. Active Discovery (The Scan)
-* The agent searches 15+ clusters simultaneously:
-    * **ATS Cluster:** Greenhouse, Lever, Ashby, etc. (Direct API-like search).
-    * **Social Cluster:** LinkedIn Posts (Public web view).
-    * **Regional Cluster:** Dynamically found local boards (e.g., *Wellfound* for Startups, *jobs.ch* for Swiss).
-* **The Filter:** 
-    * "Fingerprinting" removes duplicates.
-    * "Seniority Guard" creates a hard filter before AI scoring.
-
-### 4. Ranking & Deep Dive
-* **Glass Box Scoring:** Click any Score Ring (e.g., "85") to see the rubric breakdown.
-* **Borderline Leads:** Toggle **"🤔 Show Maybe"** to see leads the AI wasn't sure about (score 40-60).
-* **Deep Analyze:** Click `🕵️` to run a background check on the company culture and interview process.
-
-### 5. Automated Outreach
-* Click **"✨ Draft Outreach"**.
-* Click **"🔍 Auto-Find HM"** to locate the potential boss.
-* The AI writes a highly specific, non-generic message for LinkedIn/Email.
+### 4. 🧠 Bring Your Own Compute (BYOC)
+Zero backends. Zero databases. Your configured API keys (OpenAI, Gemini, Anthropic, Serper) operate locally inside your browser's memory and are saved to your offline `LocalStorage`.
 
 ---
 
-## 🏗️ Architecture (For Developers)
+## 🚀 Getting Started
 
-* **Frontend:** React + TypeScript + Vite + TailwindCSS.
-* **State Management:** LocalStorage (Persistence) + React Context.
-* **AI Layer:** 
-    * **Reasoning:** Perplexity `sonar-reasoning` (or `sonar-pro`).
-    * **Search:** Serper (Google wrapper).
-    * **OCR:** Tesseract.js (Client-side WASM).
-* **Logic:**
-    * **Two-Pass Scoring:** fast regex filter -> cheap AI score -> expensive AI ranking.
-    * **Hallucination Guard:** Scoring is strictly grounded in the provided text snippet.
+Job Radar requires Node.js `v18+`.
 
-## 🛡️ Privacy
-This tool runs **100% Client-Side**. No data is sent to our servers. Your API keys are stored in your browser's LocalStorage.
+```bash
+# Clone the repository
+git clone https://github.com/adarshsenapati/AI-Job-Search-Tool-Free-main-antigravity.git job-radar
+cd job-radar
+
+# Install dependencies
+npm install
+
+# Start the Vite Dev Server
+npm run dev
+```
+
+### Required API Keys
+Upon launching `localhost:5173`, the UI will prompt you to configure:
+1.  **Search Engine:** A [Serper.dev](https://serper.dev/) API Key (Google Search JSON API).
+2.  **Intelligence:** An LLM API key. We support **Google Gemini**, **Perplexity**, **OpenAI**, and **Anthropic**. The engine restricts polling concurrency specifically to protect Free Tier API limits.
 
 ---
 
-**Built with ❤️ for the Job Hunt Grind.**
-*v3.0 - "The Agentic Era"*
+## 🏗️ Core Engineering Architecture
+
+For external LLMs or senior developers aiming to modify the source code, please review the extensive [`comprehensive_architecture.md`](./comprehensive_architecture.md) document at the root of the project. A quick structural layout:
+
+*   **`lib/discovery.ts`**: The query generation and algorithmic deduplication logic. Handles combinatorial ATS expansion and fingerprinting.
+*   **`lib/scoring.ts`**: The heavily engineered LLM instructions and concurrent execution queue (`p-limit`).
+*   **`lib/serper.ts`**: Deep integration with Google Search APIs involving specific `tbs` chronological targeting overrides.
+*   **`components/DiscoveryFeed.tsx`**: The streaming orchestration dashboard displaying live jobs while asynchronous batching loops continue behind the scenes.
+
+## 🔒 Privacy Guarantee
+This is a purely stateless UI wrapper over standard JSON REST APIs. No analytics, tracking, or remote databases are wired into this client. If you clear your browser cache, your identity vanishes.
+
+## 📜 License
+MIT License - Open, extendable, and yours to modify.
